@@ -1,11 +1,17 @@
 [tool.poetry]
-name = "zenv"
-version = "0.0.2"
+name = "zenv-cli"
+version = "0.0.3"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"
 readme = 'README.md'
 keywords = ['cli', 'docker', 'developer', 'environment']
+homepage = 'https://github.com/zueve/zenv'
+repository = 'https://github.com/zueve/zenv'
+documentation = 'https://github.com/zueve/zenv'
+packages = [
+    { include = "zenv" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.6"
