@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "zenv"
+version = "0.0.2"
+description = ""
+authors = ["evegny.zuev <zueves@gmail.com>"]
+license = "MIT"
+readme = 'README.md'
+keywords = ['cli', 'docker', 'developer', 'environment']
+
+[tool.poetry.dependencies]
+python = "^3.6"
+toml = "^0.9"
+click = "*"
+docker = "*"
+
+[tool.poetry.dev-dependencies]
+ipython = "^7.0"
+pytest = "*"
+
+[tool.poetry.scripts]
+zenv = 'zenv.cli:cli'
+ze = 'zenv.cli:call'
