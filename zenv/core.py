@@ -36,9 +36,9 @@ def run(config):
             container=config['docker']['container_name'],
             command=command
         )
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, shell=True).returncode
         status = 'Success' if result == 0 else 'Fail'
-        print('{command} -> {status}')
+        print(f'{command} -> {status}')
 
 
 def call(config, command):
