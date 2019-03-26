@@ -17,7 +17,7 @@ def entrypoint():
 
 def test_init(entrypoint):
     assert subprocess.run(
-        f'{entrypoint} init', shell=True).returncode == 1  # allready exist
+        f'{entrypoint} init', shell=True).returncode == 1,  'allready exist'
 
     assert subprocess.run(
         f'{entrypoint} info', shell=True).returncode == 0

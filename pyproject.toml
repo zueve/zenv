@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "zenv-cli"
-version = "0.0.4"
+version = "0.0.6"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"
@@ -25,4 +25,4 @@ pytest = "*"
 
 [tool.poetry.scripts]
 zenv = 'zenv.cli:cli'
-ze = 'zenv.cli:call'
+ze = 'zenv.cli:exec'

@@ -25,6 +25,7 @@ def run(config):
     cmd = (
         f"docker run -d "
         f"--name {config['docker']['container_name']} "
+        f"--network {config['run']['network']} "
         f"{ports_str} {volumes_str} {environment_str} {rm_str}"
         f"{config['docker']['image']} sleep infinity"
     )

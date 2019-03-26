@@ -15,6 +15,7 @@ CONFIG_DEFAULTS = {
         'ports': [],
         'forvard_environment': [],
         'autoremove': False,
+        'network': 'host',
         'init_commands': ['useradd -m -r -u `id -u` -g `id -gnr` `id -unr`'],
     },
     'environment': {
