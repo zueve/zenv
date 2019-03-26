@@ -17,6 +17,7 @@ CONFIG_DEFAULTS = {
         'autoremove': False,
         'network': 'host',
         'init_commands': ['useradd -m -r -u `id -u` -g `id -gnr` `id -unr`'],
+        'init_user_commands': [],
     },
     'environment': {
         'ZENVCONTAINER': '{container_name}',

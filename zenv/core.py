@@ -41,6 +41,11 @@ def run(config):
         status = 'Success' if result == 0 else 'Fail'
         print(f'{command} -> {status}')
 
+    for command in config['run']['init_user_commands']:
+        result = call(config, command)
+        status = 'Success' if result == 0 else 'Fail'
+        print(f'{command} -> {status}')
+
 
 def call(config, command):
     current_status = status(config['docker']['container_name'])
@@ -62,7 +67,7 @@ def call(config, command):
         f"docker exec -i -t -w `pwd` -u `id -u`:`id -g` "
         f"{environment_str} {config['docker']['container_name']} {command}"
     )
-    subprocess.run(cmd, shell=True)
+    return subprocess.run(cmd, shell=True).returncode
 
 
 def status(container_name):
