@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "zenv-cli"
-version = "0.0.9"
+version = "0.0.10"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"

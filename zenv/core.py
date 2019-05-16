@@ -102,3 +102,18 @@ def rm(container_name):
         return
     cmd = f'docker rm {container_name}'
     subprocess.run(cmd, shell=True)
+
+
+def stop_all(exclude_containers=()):
+    """
+    Stop all containers started with `zenv-`
+
+    """
+
+    client = docker.from_env()
+    ps = client.containers.list()
+    for container in ps:
+        if (container.name.startswith(const.CONTAINER_PREFIX + '-')
+            and container.name not in exclude_containers
+        ):
+            stop(container.name)

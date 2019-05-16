@@ -84,5 +84,22 @@ def rm(zenvfile):
     return core.rm(config['docker']['container_name'])
 
 
+@cli.command(name='stop-all')
+@click.option('--zenvfile', default=None, help='Path to zenvfile')
+@click.option('--exclude_current', '-e', default=None,
+              help='Exclude current container')
+def stop_all(zenvfile, exclude_current):
+    """Stop all zenv containers"""
+
+    excludes = []
+
+    if exclude_current:
+        config = utils.get_config(zenvfile)
+        excludes.append(config['docker']['container_name'])
+
+    return core.stop_all(excludes)
+
+
+
 if __name__ == '__main__':
     cli()

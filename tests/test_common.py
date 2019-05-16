@@ -35,6 +35,12 @@ def test_init(entrypoint):
         f'{entrypoint} stop', shell=True).returncode == 0
 
     assert subprocess.run(
+        f'{entrypoint} exec ls', shell=True).returncode == 0
+
+    assert subprocess.run(
+        f'{entrypoint} stop-all', shell=True).returncode == 0
+
+    assert subprocess.run(
         f'{entrypoint} info', shell=True).returncode == 0
 
     assert subprocess.run(
