@@ -113,7 +113,8 @@ def stop_all(exclude_containers=()):
     client = docker.from_env()
     ps = client.containers.list()
     for container in ps:
-        if (container.name.startswith(const.CONTAINER_PREFIX + '-')
+        if (
+            container.name.startswith(const.CONTAINER_PREFIX + '-')
             and container.name not in exclude_containers
         ):
             stop(container.name)

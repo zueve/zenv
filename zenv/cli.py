@@ -19,7 +19,8 @@ def cli():
 
 
 @cli.command()
-@click.option('--image', '-i', default=const.DEFAULT_IMAGE, help='Docker Image')
+@click.option('--image', '-i', default=const.DEFAULT_IMAGE,
+              help='Docker Image')
 @click.option('--container-name', '-c', default=None, help='Container name')
 def init(image, container_name):
     """Initialize Invironment: create Zenvfile"""
@@ -86,7 +87,7 @@ def rm(zenvfile):
 
 @cli.command(name='stop-all')
 @click.option('--zenvfile', default=None, help='Path to zenvfile')
-@click.option('--exclude_current', '-e', default=None,
+@click.option('--exclude-current', '-e', 'exclude_current', is_flag=True,
               help='Exclude current container')
 def stop_all(zenvfile, exclude_current):
     """Stop all zenv containers"""
@@ -98,7 +99,6 @@ def stop_all(zenvfile, exclude_current):
         excludes.append(config['docker']['container_name'])
 
     return core.stop_all(excludes)
-
 
 
 if __name__ == '__main__':

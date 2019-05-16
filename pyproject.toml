@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "zenv-cli"
-version = "0.0.10"
+version = "0.0.11"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"
@@ -22,6 +22,7 @@ docker = "*"
 [tool.poetry.dev-dependencies]
 ipython = "^7.0"
 pytest = "*"
+flake8 = "^3.7"
 
 [tool.poetry.scripts]
 zenv = 'zenv.cli:cli'
