@@ -1,6 +1,6 @@
 import os
+import logging as logger
 import subprocess
-import docker
 from . import utils
 from . import const
 
@@ -30,6 +30,7 @@ def run(config):
         f"{config['docker']['image']} {config['run']['command']}"
     )
     with utils.in_directory(os.path.dirname(config['zenvfile_path'])):
+        logger.debug(cmd)
         subprocess.run(cmd, shell=True)
 
     for command in config['run']['init_commands']:
@@ -37,6 +38,7 @@ def run(config):
             container=config['docker']['container_name'],
             command=command
         )
+        logger.debug(cmd)
         result = subprocess.run(cmd, shell=True).returncode
         status = 'Success' if result == 0 else 'Fail'
         print(f'{command} -> {status}')
@@ -53,6 +55,7 @@ def call(config, command):
         run(config)
     elif current_status == const.STATUS_STOPED:
         cmd = f'docker start {config["docker"]["container_name"]}'
+        logger.debug(cmd)
         subprocess.run(cmd, shell=True)
 
     # Exec command
@@ -67,20 +70,28 @@ def call(config, command):
         f"docker exec -i -t -w `pwd` -u `id -u`:`id -g` "
         f"{environment_str} {config['docker']['container_name']} {command}"
     )
+    logger.debug(cmd)
     return subprocess.run(cmd, shell=True).returncode
 
 
 def status(container_name):
-    client = docker.from_env()
-    ps = client.containers.list(all=True, filters={'name': container_name})
 
-    if not ps:
+    cmd = (
+        f"docker ps --all --filter 'name={container_name}' "
+        "--format='{{.Status}}'"
+    )
+
+    logger.debug(cmd)
+    result = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    status = (
+        result.stdout.decode().split()[0].upper() if result.stdout else None
+    )
+
+    if not status:
         return const.STATUS_NOT_EXIST
-
-    container = ps[0]
-    if container.status == 'exited':
+    elif status == 'EXITED':
         return const.STATUS_STOPED
-    elif container.status == 'running':
+    elif status == 'UP':
         return const.STATUS_RUNNING
 
 
@@ -110,11 +121,14 @@ def stop_all(exclude_containers=()):
 
     """
 
-    client = docker.from_env()
-    ps = client.containers.list()
-    for container in ps:
+    cmd = (
+        "docker ps  --format='{{.Names}}'"
+    )
+    result = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+    for container_name in result.stdout.decode().split('\n'):
         if (
-            container.name.startswith(const.CONTAINER_PREFIX + '-')
-            and container.name not in exclude_containers
+            container_name.startswith(const.CONTAINER_PREFIX + '-')
+            and container_name not in exclude_containers
         ):
-            stop(container.name)
+            stop(container_name)

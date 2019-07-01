@@ -56,7 +56,7 @@ def init(image, container_name, is_update):
              add_help_option=False)
 @click.option('--zenvfile', default=None, help='Path to zenvfile')
 @click.argument('command', required=True, nargs=-1, type=click.UNPROCESSED)
-def exec(zenvfile,  command):
+def exec(zenvfile, command):
     """Call some command inside container"""
 
     config = utils.get_config(zenvfile)

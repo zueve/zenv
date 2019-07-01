@@ -1,4 +1,5 @@
 import os
+import logging
 from contextlib import contextmanager
 import click
 import toml
@@ -37,6 +38,13 @@ def get_config(zenvfile=None):
     config = toml.load(zenvfile)
     config = merge_config(config, const.CONFIG_DEFAULTS)
     config['zenvfile_path'] = zenvfile
+
+    # init logging
+    if 'debug' in config and config['debug']:
+        loglevel = logging.DEBUG
+    else:
+        loglevel = logging.INFO
+    logging.basicConfig(level=loglevel)
     return config
 
 

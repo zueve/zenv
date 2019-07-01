@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "zenv-cli"
-version = "0.0.14"
+name = "zenv"
+version = "0.0.15"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"
@@ -17,7 +17,6 @@ packages = [
 python = "^3.6"
 toml = "^0.9"
 click = "*"
-docker = "*"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.0"
