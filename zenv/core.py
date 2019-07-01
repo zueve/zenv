@@ -17,7 +17,7 @@ def run(config):
         config['environment'], config['run']['blacklist_environment'])
 
     environment_str = ' '.join(
-        [f'-e {k}={v}' for k, v in environment.items()]
+        [f'-e {k}="{v}"' for k, v in environment.items()]
     )
 
     rm_str = '--rm' if config['run']['autoremove'] else ''
@@ -60,7 +60,7 @@ def call(config, command):
         config['environment'], config['run']['blacklist_environment'])
 
     environment_str = ' '.join(
-        [f'-e {k}={v}' for k, v in environment.items()]
+        [f'-e {k}="{v}"' for k, v in environment.items()]
     )
 
     cmd = (
