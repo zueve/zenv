@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "zenv"
+name = "zenv-cli"
 version = "0.0.15"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
