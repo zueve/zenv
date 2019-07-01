@@ -27,7 +27,7 @@ def run(config):
         f"--name {config['docker']['container_name']} "
         f"--network {config['run']['network']} "
         f"{ports_str} {volumes_str} {environment_str} {rm_str}"
-        f"{config['docker']['image']} sleep infinity"
+        f"{config['docker']['image']} {config['run']['command']}"
     )
     with utils.in_directory(os.path.dirname(config['zenvfile_path'])):
         subprocess.run(cmd, shell=True)

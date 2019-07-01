@@ -20,6 +20,7 @@ CONFIG_DEFAULTS = {
         'blacklist_environment': list(os.environ.keys()),
         'autoremove': False,
         'network': 'bridge',
+        'command': 'sleep infinity',
         'init_commands': ['useradd -m -r -u `id -u` -g `id -gnr` `id -unr`'],
         'init_user_commands': [],
     },
