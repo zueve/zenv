@@ -1,5 +1,4 @@
 import os
-import fnmatch
 from contextlib import contextmanager
 import click
 import toml
@@ -27,13 +26,6 @@ def in_directory(path):
     os.chdir(path)
     yield path
     os.chdir(pwd)
-
-
-def filter_by_masks(items, masks):
-    result = []
-    for mask in masks:
-        result.extend(fnmatch.filter(items, mask))
-    return set(result)
 
 
 def get_config(zenvfile=None):
@@ -64,16 +56,13 @@ def merge_config(custom, origin):
     return custom
 
 
-def composit_environment(static_env, forvard_env):
+def composit_environment(static_env, blacklist):
     env = {}
-    if forvard_env:
-        forvard_environment_keys = filter_by_masks(
-            items=os.environ.keys(),
-            masks=forvard_env
-        )
-        forvard_environment = {
-            key: os.environ[key] for key in forvard_environment_keys}
-        env.update(forvard_environment)
+
+    env = {
+        var: value for var, value in os.environ.items()
+        if var not in blacklist
+    }
     if static_env:
         env.update(static_env)
     return env

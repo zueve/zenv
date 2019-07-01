@@ -14,7 +14,7 @@ def run(config):
     volumes_str = f'-v {volumes_str}' if volumes_str else ''
 
     environment = utils.composit_environment(
-        config['environment'], config['run']['forvard_environment'])
+        config['environment'], config['run']['blacklist_environment'])
 
     environment_str = ' '.join(
         [f'-e {k}={v}' for k, v in environment.items()]
@@ -57,7 +57,7 @@ def call(config, command):
 
     # Exec command
     environment = utils.composit_environment(
-        config['environment'], config['run']['forvard_environment'])
+        config['environment'], config['run']['blacklist_environment'])
 
     environment_str = ' '.join(
         [f'-e {k}={v}' for k, v in environment.items()]

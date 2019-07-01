@@ -22,19 +22,30 @@ def cli():
 @click.option('--image', '-i', default=const.DEFAULT_IMAGE,
               help='Docker Image')
 @click.option('--container-name', '-c', default=None, help='Container name')
-def init(image, container_name):
+@click.option('--update', '-u', 'is_update', is_flag=True, default=False,
+              help='Merge current Zenvfile with defaults')
+def init(image, container_name, is_update):
     """Initialize Invironment: create Zenvfile"""
 
     fpath = os.path.join(os.getcwd(), const.DEFAULT_FILENAME)
-    if os.path.exists(fpath):
-        raise click.ClickException(f'{fpath} already exist')
-        return
+    if is_update:
+        if not os.path.exists(fpath):
+            raise click.ClickException(f'{fpath} does\'t exist')
+        config_template = utils.get_config(fpath)
+        config_template['docker'] = const.CONFIG_DEFAULTS['docker']
+        del config_template['zenvfile_path']
+    else:
+        if os.path.exists(fpath):
+            raise click.ClickException(f'{fpath} already exist')
+        config_template = const.CONFIG_DEFAULTS
 
     if not container_name:
         container_name = os.path.basename(os.path.dirname(fpath)) or 'root'
 
-    content = toml.dumps(const.CONFIG_DEFAULTS).format(
-        image=image, container_name=container_name)
+    content = toml.dumps(config_template).format(
+        image=image,
+        container_name=container_name
+    )
 
     with open(fpath, 'w') as f:
         f.write(content)
@@ -73,7 +84,7 @@ def stop(zenvfile):
     """Stop container"""
 
     config = utils.get_config(zenvfile)
-    return core.stop(config['docker']['container_name'])
+    core.stop(config['docker']['container_name'])
 
 
 @cli.command()
@@ -82,7 +93,7 @@ def rm(zenvfile):
     """Remove container (will stop container, if nedd)"""
 
     config = utils.get_config(zenvfile)
-    return core.rm(config['docker']['container_name'])
+    core.rm(config['docker']['container_name'])
 
 
 @cli.command(name='stop-all')
@@ -98,7 +109,7 @@ def stop_all(zenvfile, exclude_current):
         config = utils.get_config(zenvfile)
         excludes.append(config['docker']['container_name'])
 
-    return core.stop_all(excludes)
+    core.stop_all(excludes)
 
 
 if __name__ == '__main__':

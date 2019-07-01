@@ -1,3 +1,5 @@
+import os
+
 DEFAULT_FILENAME = 'Zenvfile'
 DEFAULT_IMAGE = 'ubuntu:latest'
 
@@ -15,7 +17,7 @@ CONFIG_DEFAULTS = {
     'run': {
         'volumes': ['`pwd`:`pwd`:rw'],
         'ports': [],
-        'forvard_environment': [],
+        'blacklist_environment': list(os.environ.keys()),
         'autoremove': False,
         'network': 'bridge',
         'init_commands': ['useradd -m -r -u `id -u` -g `id -gnr` `id -unr`'],
