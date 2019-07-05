@@ -1,7 +1,85 @@
-Zen Environment
-===============
+Zenv: ZEN Env
+=============
 
-Zenv is docker based virtual environment for developers!
+Zenv goal is runinig console applications inside docker - container as is native applications
 
-You could execute any command inside container as in your native terminals
+## Usage
+```
+> zenv init
+Zenv created!
 
+> ze <your command>
+```
+
+## Motivation
+
+Как разработчик я  постоянно сталкиваюсь с  необходимость устанавливать дополнительнные приложения в систему. Конечно современные пакетные менеджеры такие как poetry, pipenv npm, cargo, ext, отлично решают за нас большинство проблем с зависимостями внутри одного стека технологий. Но не позволяют решить проблему с установкой системных библиотек. Если у вас много проектов требующих раличные версии системных библиотек, то у вас проблемы
+
+В продакшене такая проблема давно решается контейнерной изоляцией, и как правило это doker. Поэтому многие мои коллеги пользуются docker - образами и docker-compose, не только для запуска сервисов в продакшене но и для разработки и отдалки программ на локальной машине
+
+К сожалению, при разработке внутри коннтейнера предназначенного для запуска в проде присуще несколько проблем:
+
+- Вы можете стаклкуться с отсутствием некоторых привычных вам утилит внутри контейнера.
+- Если вы попытаетесь доустановить пакеты в процессе работы то сталкнетесь с отсутствием необходимых прав
+- Права файлов созданных через командную оболочку  контейнера имеют отличные права и принадлежет другому пользователю
+- Главное теряется привычный опыт работы, вы не можете использовать ваш любимый yнастроенный shell
+
+Конечнео могие из описанных проблем решаются создание docker-образа специально для раздаботки под конкретный проект, `zenv` как раз помогает создавать такие контейнеры очень просто
+
+## Features
+
+- Simplify: all interaction with the container occurs with one short command: `ze`
+- Zenv automatically forwarded current directory to the container with the same PWD
+- Zenv automatically forwarded current UserID, GroupID to container
+
+    Therefore, files created in the container have the same rights as those created in the native console and you can also use `sudo` to get privileges
+    ```
+    > sudo ze <command>
+    ```
+    or
+
+    ```
+    > sudo !!
+    ```
+
+- Zenv can forwarded environment vars as is native
+    ```
+    > MYVAR=1!!!! ze env
+    ```
+    TODO see how it works
+
+- Minimal performance impact
+- Customization: you can additionally control container parameters using Zenvfile
+
+
+## Install
+  - должен быть у становлен docker, я использую 18.09.2 и  не тестирывал на более ранних версиях
+  - Проверьте что у вас права вашего пользователя позволяют взаимодействовать с doker-ом
+  - Как добавить пользователю права
+  - Необходим python версии 3.7.^ c установщиком pip
+  - > sudo pip install zenv-cli
+  - или
+  - > sudo pip3 install zenv-cli
+
+## How It works
+`zenv init`  - создает в текущей дирректории `Zenvfile`. В данном файле описываются связь с doker онтейнером который будет создан для выполнения изолированных команд
+По умолчнию образом контейнера используется ubuntu: latest
+Но вы можере поменять его  установкой флага -i. Например
+> zenv init -i python:latest
+Или редактирование Zenvfile
+
+
+
+  - zenv exec <COMMAND> выполняет COMMAND внутри контейнера
+    - При при выполнении команы контейнер не создан, он бедет собран, а если остановлен то будет запущен
+    - При при выполнении команы в контейрер пробрасывается запустивший команду пользиватель и группа. Поэтому для получения привелегий можно использовать стандартный: sudo ze <COMMAND>
+    - При при выполнении команы в контейнер пробрасывается дирректория от пути где лежит Zenvfile. Поэтому zenv exec можно запускать перемещаясть в глубь дирректорий
+    - Так же в контейнер пробрасываются переменные среды.
+    - > MYVAR=SUPER ze env
+      - Для избежания конфликтов переменных хоста и контейнера, все установленные сисиемные переменные при созданиии Zenvfile помещаются в blacklist, из которого могут быть удалены редактирование Zenvfile
+    - Другие команды:
+
+## Examples
+  - install neovim
+
+## Zenvfile
