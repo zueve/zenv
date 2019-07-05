@@ -1,7 +1,7 @@
-Zenv: ZEN Env
+Zenv: ZEN ENV
 =============
 
-Zenv goal is runinig console applications inside docker - container as is native applications
+Zenv goal is simplify runinig console applications inside docker - container as is native applications
 
 ## Usage
 ```
