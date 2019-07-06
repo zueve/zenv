@@ -49,7 +49,7 @@ def run(config):
         print(f'{command} -> {status}')
 
 
-def call(config, command):
+def call(config, command, tty=True):
     current_status = status(config['docker']['container_name'])
     if current_status == const.STATUS_NOT_EXIST:
         run(config)
@@ -66,8 +66,9 @@ def call(config, command):
         [f'-e {k}="{v}"' for k, v in environment.items()]
     )
 
+    mode = '-it' if tty else '-i'
     cmd = (
-        f"docker exec -i -t -w `pwd` -u `id -u`:`id -g` "
+        f"docker exec {mode} -w `pwd` -u `id -u`:`id -g` "
         f"{environment_str} {config['docker']['container_name']} {command}"
     )
     logger.debug(cmd)

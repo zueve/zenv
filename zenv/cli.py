@@ -1,4 +1,5 @@
 import os
+import sys
 import click
 import toml
 
@@ -60,7 +61,8 @@ def exec(zenvfile, command):
     """Call some command inside container"""
 
     config = utils.get_config(zenvfile)
-    core.call(config, ' '.join(command))
+    tty = sys.stdin.isatty()
+    core.call(config, '"' + '" "'.join(command) + '"', tty)
 
 
 @cli.command()
