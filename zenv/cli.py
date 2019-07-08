@@ -25,7 +25,7 @@ def cli():
 @click.option('--update', '-u', 'is_update', is_flag=True, default=False,
               help='Merge current Zenvfile with defaults')
 def init(image, container_name, is_update):
-    """Initialize Invironment: create Zenvfile"""
+    """Initialize Environment: create Zenvfile"""
 
     fpath = os.path.join(os.getcwd(), const.DEFAULT_FILENAME)
     if is_update:
@@ -54,17 +54,17 @@ def init(image, container_name, is_update):
 
 @cli.command(context_settings=dict(ignore_unknown_options=True),
              add_help_option=False)
-@click.option('--zenvfile', default=None, help='Path to zenvfile')
+@click.option('--zenvfile', default=None, help='Path to Zenvfile')
 @click.argument('command', required=True, nargs=-1, type=click.UNPROCESSED)
 def exec(zenvfile, command):
-    """Call some command inside container"""
+    """Call some command inside the container"""
 
     config = utils.get_config(zenvfile)
     core.call(config, ' '.join(command))
 
 
 @cli.command()
-@click.option('--zenvfile', default=None, help='Path to zenvfile')
+@click.option('--zenvfile', default=None, help='Path to Zenvfile')
 def info(zenvfile):
     """Show current container info"""
 
@@ -79,7 +79,7 @@ def info(zenvfile):
 
 
 @cli.command()
-@click.option('--zenvfile', default=None, help='Path to zenvfile')
+@click.option('--zenvfile', default=None, help='Path to Zenvfile')
 def stop(zenvfile):
     """Stop container"""
 
@@ -88,16 +88,16 @@ def stop(zenvfile):
 
 
 @cli.command()
-@click.option('--zenvfile', default=None, help='Path to zenvfile')
+@click.option('--zenvfile', default=None, help='Path to Zenvfile')
 def rm(zenvfile):
-    """Remove container (will stop container, if nedd)"""
+    """Remove container (will stop the container, if need)"""
 
     config = utils.get_config(zenvfile)
     core.rm(config['docker']['container_name'])
 
 
 @cli.command(name='stop-all')
-@click.option('--zenvfile', default=None, help='Path to zenvfile')
+@click.option('--zenvfile', default=None, help='Path to Zenvfile')
 @click.option('--exclude-current', '-e', 'exclude_current', is_flag=True,
               help='Exclude current container')
 def stop_all(zenvfile, exclude_current):
