@@ -1,8 +1,8 @@
 Zenv: ZEN ENV
 =============
 
-Zenv is alternativ docker CLI created specialy for developers.
-Zenv goal is simplify runinig console applications inside container as is native (host-machine) applications
+Zenv is an alternate docker CLI created especially for developers. 
+The main goal of Zenv is to simplify running console applications inside container as is native (host-machine) applications
 
 |Nativ command         |    |Command executed inside container|
 |----------------------|----|---------------------------------|
@@ -19,17 +19,16 @@ Zenv created!
 
 ## Motivation
 
-As a developer, when setuping a project localy, I usually need to install additional applications on the system. Of course, modern package managers such as poetry, pipenv, npm, cargo, ext, perfectly solve for us most of the problems with dependencies within a single stack of technologies. But they do not allow to solve the problem with the installation of system libraries. If you have a lot of projects that require different versions of system libraries, then you have problems
+As a developer, when set up a project locally, I usually need to install additional applications on the system. Of course, modern package managers such as poetry, pipenv, npm, cargo, ext, perfectly solve for us most of the problems with dependencies within a single stack of technologies. But they do not allow to solve the problem with the installation of system libraries. If you have a lot of projects that require different versions of system libraries, then you have problems
 
-In production, this problem has long been solved by container insulation, and as a rule it is a `Docker`. Therefore, many of my colleagues use docker-images and docker-compose, not only to run  services in production environment, but also to develop and debug programs on a local machine
+In production, this problem has long been solved by container insulation, and as a rule, it is a `Docker`. Therefore, many of my colleagues use docker-images and docker-compose, not only to run  services in a production environment but also to develop and debug programs on a local machine
 
 Unfortunately, there are several problems along the way:
 
-- Some your familiar utilities  may not be preinstalled in the container
+- Some of your familiar utilities  may not be preinstalled in the container
 - If you try to install packages in the process, you will encounter the lack of necessary rights
-- Forgret about debuging with `print`
+- Forget about debugging with `print`
 - The main thing is lost the usual experience, you can not use your favorite customized shell
-
 
 Of course, the problems described above are solved by creating a docker image specifically for developing a specific project, `zenv` just helps to create such containers very simply
 
@@ -53,7 +52,7 @@ Of course, the problems described above are solved by creating a docker image sp
     ```shell
     > MYVAR=LIVE!!!! ze env
     ```
-- And of couse your could combinate native and containerized commands in Unix pipes
+- And of course your could combinate native and containerized commands in Unix pipes
   ```shell
   > ze ls | head -7 | ze tail -5
   ```
@@ -77,28 +76,28 @@ By nature, zenv is a small automated layer over the official docker CLI
 
 ### init
 
-Command `zenv init` create `Zenvfile` in current dirrectory. This file describes the relationship with the doker image and container that will be created to execute isolated commands.
+Command `zenv init` create `Zenvfile` in current directory. This file describes the relationship with the docker image and container that will be created to execute isolated commands.
 
 By default, used image is `ubuntu: latest`.
 But you can change it by setting `-i` flag. For example:
 ```shell
 > zenv init -i python:latest
 ```
-Or edit `Zenvfile` manualy
+Or edit `Zenvfile` manually
 
 
 ### Execute
 
-Command `zenv exec <COMMAND>` or it shot allias `ze <COMMAND>` run `<COMMAND>` in contatiner environment. When running the command:
-- Zenv check current container status (running, stopped, removed), and up container if need.
-- The container runed with the command `sleep infinity`. Therefor it will be easily accessible
+Command `zenv exec <COMMAND>` or it shot alias `ze <COMMAND>` run `<COMMAND>` in a container environment. When running the command:
+- Zenv checks current container status (running, stopped, removed), and up container if need.
+- The container run with the command `sleep infinity`. Therefore it will be easily accessible
 - UID and GID that ran the command are pushed into the container. Therefor your could use `sudo ze <COMMAND>`
 - When executing the command, the directory from the path where Zenvfile is located is forwarded to the container as is a current PWD. Therefor your could run `ze` from deep into directories relative to Zenvfile
-- Environment variables are also thrown into the container ass a native.
+- Environment variables are also thrown into the container as a native.
   ```
   > MYVAR=SUPER ze env
   ```
- To avoid conflicts between host and container variables, all installed system variables are placed    in the blacklist when zenvfile is created, from which editing can be removed
+ To avoid conflicts between host and container variables, all installed system variables are placed    in the blacklist when Zenvfile is created, from which editing can be removed
 
 ### Other commands
 
@@ -116,10 +115,10 @@ Options:
   --help  Show this message and exit.
 
 Commands:
-  exec      Call some command inside container
+  exec      Call some command inside the container
   info      Show current container info
-  init      Initialize Invironment: create Zenvfile
-  rm        Remove container (will stop container, if nedd)
+  init      Initialize Environment: create Zenvfile
+  rm        Remove container (will stop the container, if need)
   stop      Stop container
   stop-all  Stop all zenv containers
 ```
