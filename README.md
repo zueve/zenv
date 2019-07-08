@@ -1,30 +1,37 @@
 Zenv: ZEN ENV
 =============
 
-Zenv goal is simplify runinig console applications inside docker - container as is native applications
+Zenv is alternativ docker CLI created specialy for developers.
+Zenv goal is simplify runinig console applications inside container as is native (host-machine) applications
+
+|Nativ command         |    |Command executed inside container|
+|----------------------|----|---------------------------------|
+|```> <your command>```| -> |```> ze <your command>```        |
 
 ## Usage
-```
+```shell
 > zenv init
 Zenv created!
 
-> ze <your command>
+> # run `ls` command inside contaner
+> ze ls
 ```
 
 ## Motivation
 
-Как разработчик я  постоянно сталкиваюсь с  необходимость устанавливать дополнительнные приложения в систему. Конечно современные пакетные менеджеры такие как poetry, pipenv npm, cargo, ext, отлично решают за нас большинство проблем с зависимостями внутри одного стека технологий. Но не позволяют решить проблему с установкой системных библиотек. Если у вас много проектов требующих раличные версии системных библиотек, то у вас проблемы
+As a developer, when setuping a project localy, I usually need to install additional applications on the system. Of course, modern package managers such as poetry, pipenv, npm, cargo, ext, perfectly solve for us most of the problems with dependencies within a single stack of technologies. But they do not allow to solve the problem with the installation of system libraries. If you have a lot of projects that require different versions of system libraries, then you have problems
 
-В продакшене такая проблема давно решается контейнерной изоляцией, и как правило это doker. Поэтому многие мои коллеги пользуются docker - образами и docker-compose, не только для запуска сервисов в продакшене но и для разработки и отдалки программ на локальной машине
+In production, this problem has long been solved by container insulation, and as a rule it is a `Docker`. Therefore, many of my colleagues use docker-images and docker-compose, not only to run  services in production environment, but also to develop and debug programs on a local machine
 
-К сожалению, при разработке внутри коннтейнера предназначенного для запуска в проде присуще несколько проблем:
+Unfortunately, there are several problems along the way:
 
-- Вы можете стаклкуться с отсутствием некоторых привычных вам утилит внутри контейнера.
-- Если вы попытаетесь доустановить пакеты в процессе работы то сталкнетесь с отсутствием необходимых прав
-- Права файлов созданных через командную оболочку  контейнера имеют отличные права и принадлежет другому пользователю
-- Главное теряется привычный опыт работы, вы не можете использовать ваш любимый yнастроенный shell
+- Some your familiar utilities  may not be preinstalled in the container
+- If you try to install packages in the process, you will encounter the lack of necessary rights
+- Forgret about debuging with `print`
+- The main thing is lost the usual experience, you can not use your favorite customized shell
 
-Конечнео могие из описанных проблем решаются создание docker-образа специально для раздаботки под конкретный проект, `zenv` как раз помогает создавать такие контейнеры очень просто
+
+Of course, the problems described above are solved by creating a docker image specifically for developing a specific project, `zenv` just helps to create such containers very simply
 
 ## Features
 
@@ -32,54 +39,110 @@ Zenv created!
 - Zenv automatically forwarded current directory to the container with the same PWD
 - Zenv automatically forwarded current UserID, GroupID to container
 
-    Therefore, files created in the container have the same rights as those created in the native console and you can also use `sudo` to get privileges
-    ```
-    > sudo ze <command>
-    ```
-    or
+  Therefore, files created in the container have the same rights as those created in the native console and you can also use `sudo` to get privileges
+  ```shell
+  > sudo ze <command>
+  ```
+  or
 
-    ```
-    > sudo !!
-    ```
+  ```shell
+  > sudo !!
+  ```
 
 - Zenv can forwarded environment vars as is native
+    ```shell
+    > MYVAR=LIVE!!!! ze env
     ```
-    > MYVAR=1!!!! ze env
-    ```
-    TODO see how it works
-
+- And of couse your could combinate native and containerized commands in Unix pipes
+  ```shell
+  > ze ls | head -7 | ze tail -5
+  ```
 - Minimal performance impact
 - Customization: you can additionally control container parameters using Zenvfile
 
 
 ## Install
-  - должен быть у становлен docker, я использую 18.09.2 и  не тестирывал на более ранних версиях
-  - Проверьте что у вас права вашего пользователя позволяют взаимодействовать с doker-ом
-  - Как добавить пользователю права
-  - Необходим python версии 3.7.^ c установщиком pip
-  - > sudo pip install zenv-cli
-  - или
-  - > sudo pip3 install zenv-cli
+  1. Make sure you have the latest version of `Docker` installed
+  2. For linux, make sure you have your user’s [rights are allowed](https://docs.docker.com/install/linux/linux-postinstall/) to interact with doker
+  3. Make sure that you have python version 3.6 or higher
+  4. Execute:
+      ```shell
+      > sudo pip install zenv-cli
+      # or
+      > sudo pip3 install zenv-cli
+      ```
 
 ## How It works
-`zenv init`  - создает в текущей дирректории `Zenvfile`. В данном файле описываются связь с doker онтейнером который будет создан для выполнения изолированных команд
-По умолчнию образом контейнера используется ubuntu: latest
-Но вы можере поменять его  установкой флага -i. Например
+By nature, zenv is a small automated layer over the official docker CLI
+
+### init
+
+Command `zenv init` create `Zenvfile` in current dirrectory. This file describes the relationship with the doker image and container that will be created to execute isolated commands.
+
+By default, used image is `ubuntu: latest`.
+But you can change it by setting `-i` flag. For example:
+```shell
 > zenv init -i python:latest
-Или редактирование Zenvfile
+```
+Or edit `Zenvfile` manualy
 
 
+### Execute
 
-  - zenv exec <COMMAND> выполняет COMMAND внутри контейнера
-    - При при выполнении команы контейнер не создан, он бедет собран, а если остановлен то будет запущен
-    - При при выполнении команы в контейрер пробрасывается запустивший команду пользиватель и группа. Поэтому для получения привелегий можно использовать стандартный: sudo ze <COMMAND>
-    - При при выполнении команы в контейнер пробрасывается дирректория от пути где лежит Zenvfile. Поэтому zenv exec можно запускать перемещаясть в глубь дирректорий
-    - Так же в контейнер пробрасываются переменные среды.
-    - > MYVAR=SUPER ze env
-      - Для избежания конфликтов переменных хоста и контейнера, все установленные сисиемные переменные при созданиии Zenvfile помещаются в blacklist, из которого могут быть удалены редактирование Zenvfile
-    - Другие команды:
+Command `zenv exec <COMMAND>` or it shot allias `ze <COMMAND>` run `<COMMAND>` in contatiner environment. When running the command:
+- Zenv check current container status (running, stopped, removed), and up container if need.
+- The container runed with the command `sleep infinity`. Therefor it will be easily accessible
+- UID and GID that ran the command are pushed into the container. Therefor your could use `sudo ze <COMMAND>`
+- When executing the command, the directory from the path where Zenvfile is located is forwarded to the container as is a current PWD. Therefor your could run `ze` from deep into directories relative to Zenvfile
+- Environment variables are also thrown into the container ass a native.
+  ```
+  > MYVAR=SUPER ze env
+  ```
+ To avoid conflicts between host and container variables, all installed system variables are placed    in the blacklist when zenvfile is created, from which editing can be removed
+
+### Other commands
+
+```shell
+> zenv --help
+Usage: zenv [OPTIONS] COMMAND [ARGS]...
+
+  ZENV(Zen-env): Containers manager for developer environment
+
+  Usage:
+
+  > zenv init -i centos:latest & ze cat /etc/redhat-release
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  exec      Call some command inside container
+  info      Show current container info
+  init      Initialize Invironment: create Zenvfile
+  rm        Remove container (will stop container, if nedd)
+  stop      Stop container
+  stop-all  Stop all zenv containers
+```
 
 ## Examples
   - install neovim
+  - My python workflow
 
 ## Zenvfile
+```toml
+[docker]
+image = "docker:dind"
+container_name = "zenv-zenv-cli"
+[run]
+volumes = [ "`pwd`:`pwd`:rw",]
+ports = []
+blacklist_environment = [ "TMPDIR", "__CF_USER_TEXT_ENCODING", "SHELL", "HOME"]
+autoremove = false
+network = "bridge"
+command = "sleep infinity"
+init_commands = [
+    "useradd -m -r -u `id -u` -g `id -gnr` `id -unr`",
+]
+init_user_commands = []
+[environment]
+```
