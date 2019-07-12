@@ -127,15 +127,18 @@ Commands:
 ```shell
 > mkgir norebooks
 > cd notebooks
-> zenv init -i python:3.7
+> zenv init -i python:3.7.3
 ```
-After edid Zenvfile to explode norebuuk ports. Update `ports = []` to `ports = ["8888:8888"`
+After edit Zenvfile to explode notebook ports. Update `ports = []` to `ports = ["8888:8888"]`
 
 ```
 > sudo ze pip install jupyter numpy scipy matplotlib
-> sudo ze jupyter notebook --ip 0.0.0.0 --NotebookApp.token='' --NotebookApp.password=''
 ```
-launch your browser hith url: http://localhost:8888
+Run notebook
+```
+> sudo ze jupyter notebook --ip 0.0.0.0
+```
+launch your browser with url: http://localhost:8888
 
 
 ## Zenvfile
