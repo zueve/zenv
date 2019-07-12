@@ -1,6 +1,8 @@
 import os
 import logging
 from contextlib import contextmanager
+import click
+import toml
 from . import const
 
 
@@ -25,6 +27,25 @@ def in_directory(path):
     os.chdir(path)
     yield path
     os.chdir(pwd)
+
+
+def get_config(zenvfile=None):
+    if not zenvfile:
+        zenvfile = find_file(os.getcwd(), fname=const.DEFAULT_FILENAME)
+    if not zenvfile:
+        raise click.ClickException('Zenvfile don\'t find')
+
+    config = toml.load(zenvfile)
+    config = merge_config(config, const.CONFIG_DEFAULTS)
+    config['zenvfile_path'] = zenvfile
+
+    # init logging
+    if 'debug' in config and config['debug']:
+        loglevel = logging.DEBUG
+    else:
+        loglevel = logging.INFO
+    logging.basicConfig(level=loglevel)
+    return config
 
 
 def merge_config(custom, origin):

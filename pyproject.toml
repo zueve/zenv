@@ -10,7 +10,7 @@ homepage = 'https://github.com/zueve/zenv'
 repository = 'https://github.com/zueve/zenv'
 documentation = 'https://github.com/zueve/zenv'
 packages = [
-    { include = "zenv" },
+    { include = "zen" },
 ]
 
 [tool.poetry.dependencies]
@@ -24,5 +24,5 @@ pytest = "*"
 flake8 = "^3.7"
 
 [tool.poetry.scripts]
-zenv = 'zenv.cli:cli'
+zenv = 'zen.cli:cli'
 ze = 'zenv.cli:exec'
