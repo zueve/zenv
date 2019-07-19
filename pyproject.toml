@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "zenv-cli"
-version = "0.2.0"
+version = "0.2.3"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"
@@ -14,8 +14,8 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.6"
-toml = "^0.9"
+python = "^3.7"
+toml = "^0.9.6"
 click = "*"
 
 [tool.poetry.dev-dependencies]

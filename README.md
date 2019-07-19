@@ -136,26 +136,49 @@ After edit Zenvfile to explode notebook ports. Update `ports = []` to `ports = [
 ```
 Run notebook
 ```
-> sudo ze jupyter notebook --ip 0.0.0.0
+> ze jupyter notebook --ip 0.0.0.0
 ```
 launch your browser with url: http://localhost:8888
 
+Also you could add this commands to Zenvfile:
+```toml
+[run]
+init_commands = [
+  [ "__create_user__"],
+  ["pip", "install", "jupyter", "numpy" "scipy" "matplotlib"]
+]
+
+[commands]
+notebook = ["jupyter", "notebook", "--ip", "0.0.0.0"]
+```
+
+And launch notebook with command
+
+```
+> ze notebook
+```
 
 ## Zenvfile
 ```toml
-[docker]
-image = "docker:dind"
-container_name = "zenv-zenv-cli"
+[main]
+image = "ubuntu:latest"
+name = "zenv-project"
+debug = false
+
 [run]
-volumes = [ "`pwd`:`pwd`:rw",]
-ports = []
-blacklist_environment = [ "TMPDIR", "__CF_USER_TEXT_ENCODING", "SHELL", "HOME"]
-autoremove = false
-network = "bridge"
-command = "sleep infinity"
-init_commands = [
-    "useradd -m -r -u `id -u` -g `id -gnr` `id -unr`",
-]
-init_user_commands = []
-[environment]
+command = [ "__sleep__",]
+init_commands = [ [ "__create_user__",],]
+
+[exec]
+env_file = ""
+env_excludes = [ "TMPDIR",]
+
+[run.options]
+volume = [ "{zenvfilepath}:{zenvfilepath}:rw",]
+detach = "true"
+publish = []
+
+[commands]
+__sleep__ = [ "sleep", "365d",]
+__create_user__ = [ "useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "zenv",]
 ```
