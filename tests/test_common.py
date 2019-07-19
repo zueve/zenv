@@ -9,7 +9,7 @@ def entrypoint():
     assert not os.path.exists('Zenvfile')
     subprocess.run('poetry run zenv init', shell=True)
 
-    yield 'zenv'
+    yield 'poetry run zenv'
 
     subprocess.run('poetry run zenv rm', shell=True)
     subprocess.run('rm Zenvfile', shell=True)

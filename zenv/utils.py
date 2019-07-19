@@ -1,7 +1,76 @@
 import os
+import sys
 import logging
+from pathlib import Path
 from contextlib import contextmanager
+from functools import reduce
+import click
+import toml
+
 from . import const
+
+
+class Default(dict):
+    def __missing__(self, key):
+        return '{' + key + '}'
+
+
+class Aliases:
+    def __init__(self, commands):
+        self.commands = commands
+
+    def __getitem__(self, command):
+        if command[0] in self.commands:
+            return (*self.commands[command[0]], *command[1:])
+        else:
+            return command
+
+
+def load_dotenv(dotenvfile):
+    try:
+        with open(dotenvfile) as file:
+            environments = file.read().splitlines()
+    except FileNotFoundError:
+        raise click.ClickException(f'Env file not found {dotenvfile}')
+
+    for i, row in enumerate(environments):
+        if '=' not in row:
+            raise click.ClickException(
+                'Broken .env file. Each row should have `=`.'
+                f'Line {i}, val `{row}`'
+            )
+    return environments
+
+def get_config(zenvfile=None):
+    if not zenvfile:
+        zenvfile = find_file(os.getcwd(), fname=const.DEFAULT_FILENAME)
+    if not zenvfile:
+        raise click.ClickException('Zenvfile don\'t find. Make `zenv init`')
+
+    params = Default(
+        zenvfilepath=os.path.dirname(zenvfile),
+        pwd=os.getcwd(),
+        uid=os.getuid(),
+        gid=os.getgid(),
+        tty='true' if sys.stdin.isatty() else 'false',
+        env_excludes='[]'
+    )
+
+    content = Path(zenvfile).read_text().format_map(params)
+    config = toml.loads(content)
+
+    content = const.CONFIG_TEMPLATE.format_map(params)
+    origin_config = toml.loads(content)
+
+    config = merge_config(config, origin_config)
+
+    # init logging
+    if 'debug' in config['main'] and config['main']['debug']:
+        loglevel = logging.DEBUG
+    else:
+        loglevel = logging.INFO
+    logging.basicConfig(level=loglevel)
+    return config
 
 
 def find_file(path: str, fname: str):
@@ -43,13 +112,40 @@ def merge_config(custom, origin):
     return custom
 
 
-def composit_environment(static_env, blacklist):
+def composit_environment(zenvfile_env, file_env, blacklist):
     env = {}
 
-    env = {
-        var: value for var, value in os.environ.items()
+    # low priority
+    env.update({row.split('=', 1)[0]: row for row in file_env})
+    # medium priority
+    env.update({row.split('=', 1)[0]: row for row in zenvfile_env})
+
+    # high priority
+    env.update({
+        var: f'{var}={value}' for var, value in os.environ.items()
         if var not in blacklist
-    }
-    if static_env:
-        env.update(static_env)
-    return env
+    })
+
+    return list(env.values())
+
+
+def build_docker_options(params):
+    options = []
+    for param, value in params.items():
+        if value in ("true", "false"):
+            option = [f'--{param}'] if value == "true" else []
+        elif isinstance(value, list):
+            option = []
+            for val in value:
+                option.extend([f'--{param}', val])
+        else:
+            option = [f'--{param}', value]
+        options.extend(option)
+    return options
+
+
+def delete_path_keys(dictionary, path):
+
+    parent_path, last_key = path[:-1], path[-1]
+    parent = reduce(dict.get, parent_path, dictionary)
+    del parent[last_key]

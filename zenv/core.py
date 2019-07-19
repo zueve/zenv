@@ -1,78 +1,59 @@
-import os
-import logging as logger
 import subprocess
-from . import utils
-from . import const
+import logging as logger
+from . import const, utils
 
 
-def run(config):
-    ports_str = ' -p '.join(config['run']['ports'])
-    ports_str = f'-p {ports_str}' if ports_str else ''
+def call(config, command, environments):
+    container_name = config['main']['name']
+    container_status = status(container_name)
 
-    volumes = config['run']['volumes']
-    volumes_str = ' -v '.join(volumes)
-    volumes_str = f'-v {volumes_str}' if volumes_str else ''
+    aliases = utils.Aliases(config['commands'])
 
-    environment = utils.composit_environment(
-        config['environment'], config['run']['blacklist_environment'])
-
-    environment_str = ' '.join(
-        [f'-e {k}="{v}"' for k, v in environment.items()]
+    # composite environments
+    exec_options = config['exec']['options']
+    exec_options['env'] = utils.composit_environment(
+        file_env=environments,
+        zenvfile_env=environments + exec_options.get('env', []),
+        blacklist=config['exec']['env_excludes']
     )
+    exec_options = utils.build_docker_options(exec_options)
 
-    rm_str = '--rm' if config['run']['autoremove'] else ''
-
-    cmd = (
-        f"docker run -d "
-        f"--name {config['docker']['container_name']} "
-        f"--network {config['run']['network']} "
-        f"{ports_str} {volumes_str} {environment_str} {rm_str}"
-        f"{config['docker']['image']} {config['run']['command']}"
-    )
-    with utils.in_directory(os.path.dirname(config['zenvfile_path'])):
-        logger.debug(cmd)
-        subprocess.run(cmd, shell=True)
-
-    for command in config['run']['init_commands']:
-        cmd = 'docker exec {container} {command}'.format(
-            container=config['docker']['container_name'],
-            command=command
+    if container_status == const.STATUS_NOT_EXIST:
+        options = {
+            'name': container_name,
+            **config['run']['options']
+        }
+        run(
+            image=config['main']['image'],
+            command=aliases[config['run']['command']],
+            options=utils.build_docker_options(options),
+            path=config['main']['zenvfilepath']
         )
+
+        # run init commands:
+        for init_command in config['run']['init_commands']:
+            exec_(container_name, aliases[init_command], [])
+
+    elif container_status == const.STATUS_STOPED:
+        cmd = ['docker', 'start', container_name]
         logger.debug(cmd)
-        result = subprocess.run(cmd, shell=True).returncode
-        status = 'Success' if result == 0 else 'Fail'
-        print(f'{command} -> {status}')
+        subprocess.run(cmd)
 
-    for command in config['run']['init_user_commands']:
-        result = call(config, command)
-        status = 'Success' if result == 0 else 'Fail'
-        print(f'{command} -> {status}')
+    exec_(container_name, aliases[command], exec_options)
 
 
-def call(config, command, tty=True):
-    current_status = status(config['docker']['container_name'])
-    if current_status == const.STATUS_NOT_EXIST:
-        run(config)
-    elif current_status == const.STATUS_STOPED:
-        cmd = f'docker start {config["docker"]["container_name"]}'
+def run(image, command, options, path):
+    cmd = ['docker', 'run', *options, image, *command]
+
+    with utils.in_directory(path):
         logger.debug(cmd)
-        subprocess.run(cmd, shell=True)
+        subprocess.run(cmd)
 
-    # Exec command
-    environment = utils.composit_environment(
-        config['environment'], config['run']['blacklist_environment'])
 
-    environment_str = ' '.join(
-        [f'-e {k}="{v}"' for k, v in environment.items()]
-    )
-
-    mode = '-it' if tty else '-i'
-    cmd = (
-        f"docker exec {mode} -w `pwd` -u `id -u`:`id -g` "
-        f"{environment_str} {config['docker']['container_name']} {command}"
-    )
+def exec_(container_name, command, options):
+    cmd = ('docker', 'exec', *options, container_name, *command)
     logger.debug(cmd)
-    return subprocess.run(cmd, shell=True).returncode
+    return subprocess.run(cmd).returncode
 
 
 def status(container_name):
