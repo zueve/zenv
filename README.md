@@ -145,7 +145,7 @@ Also you could add this commands to Zenvfile:
 [run]
 init_commands = [
   [ "__create_user__"],
-  ["pip", "install", "jupyter", "numpy" "scipy" "matplotlib"]
+  ["pip", "install", "jupyter", "numpy", "scipy", "matplotlib"]
 ]
 
 [commands]
