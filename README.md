@@ -125,7 +125,7 @@ Commands:
 
 ## Example install jupyter notebook
 ```shell
-> mkgir norebooks
+> mkgir notebooks
 > cd notebooks
 > zenv init -i python:3.7.3
 ```
