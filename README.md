@@ -1,8 +1,8 @@
 Zenv: ZEN ENV
 =============
 
-Zenv is an alternate docker CLI created especially for developers.
-The main goal of Zenv is to simplify running console applications inside container as is native (host-machine) applications
+Zenv is an alternate to docker CLI, created specifically for developers.
+The main goal of Zenv is to simplify running console applications inside container, making it seamless in use like native (host-machine) applications
 
 |Nativ command         |    |Command executed inside container|
 |----------------------|----|---------------------------------|
@@ -162,8 +162,8 @@ And launch notebook with command
 ```toml
 [main]
 image = "ubuntu:latest"
-name = "zenv-project"
-debug = false
+name = "zenv-project"    # container name
+debug = false            # for show docker commands
 
 [run]
 command = [ "__sleep__",]
@@ -182,3 +182,4 @@ publish = []
 __sleep__ = [ "sleep", "365d",]
 __create_user__ = [ "useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "zenv",]
 ```
+
