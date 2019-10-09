@@ -3,40 +3,62 @@ import logging as logger
 from . import const, utils
 
 
-def call(config, command, environments):
+def get_command_with_options(command, aliases, exec_params):
+    """
+    Find command by aliases and build exec docker options
+
+    """
+    if command[0] in aliases:
+        key = command[0]
+        command = aliases[key]['command'] + commansd[1:]
+        command_exec_params = aliases[key].get('exec', {})
+        exec_params = utils.merge_config(command_exec_params, exec_params)
+    dotenv_env = (
+        utils.load_dotenv(exec_params['env_file'])
+        if 'env_file' in exec_params and exec_params['env_file'] else {}
+    )
+    exec_options = exec_params.get('options', {})
+    exec_options['env'] = utils.composit_environment(
+        dotenv_env=dotenv_env,
+        zenvfile_env=exec_options.get('env', {}),
+        blacklist=exec_params.get('env_excludes', {})
+    )
+    return command, exec_options
+
+
+def call(config, command):
     container_name = config['main']['name']
     container_status = status(container_name)
 
-    aliases = utils.Aliases(config['commands'])
-
     # composite environments
-    exec_options = config['exec']['options']
-    exec_options['env'] = utils.composit_environment(
-        file_env=environments,
-        zenvfile_env=environments + exec_options.get('env', []),
-        blacklist=config['exec']['env_excludes']
+    command, exec_options = get_command_with_options(
+        command, config['aliases'], config['exec']
     )
-    exec_options = utils.build_docker_options(exec_options)
 
     if container_status == const.STATUS_NOT_EXIST:
         options = {'name': container_name, **config['run']['options']}
+        run_command, _ = get_command_with_options(
+            config['run']['command'], {}, {})
         run(
             image=config['main']['image'],
-            command=aliases[config['run']['command']],
+            command=run_command,
             options=utils.build_docker_options(options),
             path=config['main']['zenvfilepath']
         )
 
         # run init commands:
         for init_command in config['run']['init_commands']:
-            exec_(container_name, aliases[init_command], [])
+            init_command, init_options = get_command_with_options(
+                 command, config['aliases'], {}
+            )
+            exec_(container_name, init_command, init_options)
 
     elif container_status == const.STATUS_STOPED:
         cmd = ['docker', 'start', container_name]
         logger.debug(cmd)
         subprocess.run(cmd)
 
-    exec_(container_name, aliases[command], exec_options)
+    exec_(container_name, command, exec_options)
 
 
 def run(image, command, options, path):

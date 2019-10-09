@@ -61,13 +61,7 @@ def exec(zenvfile, command):
     """Call some command inside the container"""
 
     config = utils.get_config(zenvfile)
-
-    if config['exec']['env_file']:
-        environments = utils.load_dotenv(config['exec']['env_file'])
-    else:
-        environments = []
-
-    core.call(config, command, environments)
+    core.call(config, command)
 
 
 @cli.command()
@@ -86,7 +80,7 @@ def info(zenvfile):
 
     commands = [
         (alias, cmd)
-        for alias, cmd in config['commands'].items()
+        for alias, cmd in config['aliases'].items()
         if not alias.startswith('_')
     ]
     if commands:

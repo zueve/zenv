@@ -15,19 +15,6 @@ class Default(dict):
         return '{' + key + '}'
 
 
-class Aliases:
-    def __init__(self, commands):
-        self.commands = {
-            alias: command['command'] for alias, command in commands.items()
-        }
-
-    def __getitem__(self, command):
-        if command[0] in self.commands:
-            return (*self.commands[command[0]], *command[1:])
-        else:
-            return command
-
-
 def load_dotenv(dotenvfile):
     try:
         with open(dotenvfile) as file:
@@ -119,11 +106,12 @@ def merge_config(custom, origin):
     return custom
 
 
-def composit_environment(zenvfile_env, file_env, blacklist):
+def composit_environment(dotenv_env, zenvfile_env, blacklist):
     env = {}
 
     # low priority
-    env.update({row.split('=', 1)[0]: row for row in file_env})
+    env.update({row.split('=', 1)[0]: row for row in dotenv_env})
+
     # medium priority
     env.update({row.split('=', 1)[0]: row for row in zenvfile_env})
 

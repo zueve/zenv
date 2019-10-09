@@ -34,8 +34,9 @@ init_commands = [["__create_user__"]]
 env_file = ""
 env_excludes = {env_excludes}
 
-[commands]
+[aliases]
 __sleep__.command = ["sleep", "365d"]
+__sleep__.description = 'Infinity sleep'
 __create_user__.command = [
     "useradd", "-m",  "-r", "-u", "{uid}", "-g", "{gid}", "{id}"
 ]
