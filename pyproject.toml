@@ -15,7 +15,7 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.7"
-toml = "^0.9.6"
+toml = "^0.10.0"
 click = "*"
 
 [tool.poetry.dev-dependencies]

@@ -84,6 +84,24 @@ def info(zenvfile):
     status = core.status(config['main']['name'])
     click.echo(f'Status: {status}')
 
+    commands = [
+        (alias, cmd)
+        for alias, cmd in config['commands'].items()
+        if not alias.startswith('_')
+    ]
+    if commands:
+        click.echo('Aliases:')
+    for alias, cmd in commands:
+        if 'description' in cmd:
+            descr = cmd['description']
+        else:
+            descr = ' '.join(cmd['command'])
+            if len(descr) > 80:
+                descr = descr[: 74] + ' ...'
+
+        click.echo(f' - {alias}: {descr}')
+
+
 
 @cli.command()
 @click.option('--zenvfile', default=None, help='Path to Zenvfile')

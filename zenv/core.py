@@ -19,10 +19,7 @@ def call(config, command, environments):
     exec_options = utils.build_docker_options(exec_options)
 
     if container_status == const.STATUS_NOT_EXIST:
-        options = {
-            'name': container_name,
-            **config['run']['options']
-        }
+        options = {'name': container_name, **config['run']['options']}
         run(
             image=config['main']['image'],
             command=aliases[config['run']['command']],
@@ -47,7 +44,9 @@ def run(image, command, options, path):
 
     with utils.in_directory(path):
         logger.debug(cmd)
-        subprocess.run(cmd)
+        result = subprocess.run(cmd)
+    return result.returncode
+
 
 
 def exec_(container_name, command, options):

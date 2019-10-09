@@ -17,7 +17,9 @@ class Default(dict):
 
 class Aliases:
     def __init__(self, commands):
-        self.commands = commands
+        self.commands = {
+            alias: command['command'] for alias, command in commands.items()
+        }
 
     def __getitem__(self, command):
         if command[0] in self.commands:

@@ -35,8 +35,8 @@ env_file = ""
 env_excludes = {env_excludes}
 
 [commands]
-__sleep__ = ["sleep", "365d"]
-__create_user__ = [
+__sleep__.command = ["sleep", "365d"]
+__create_user__.command = [
     "useradd", "-m",  "-r", "-u", "{uid}", "-g", "{gid}", "{id}"
 ]
 """
