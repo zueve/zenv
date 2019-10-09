@@ -10,7 +10,7 @@ def get_command_with_options(command, aliases, exec_params):
     """
     if command[0] in aliases:
         key = command[0]
-        command = aliases[key]['command'] + commansd[1:]
+        command = aliases[key]['command'] + list(command[1:])
         command_exec_params = aliases[key].get('exec', {})
         exec_params = utils.merge_config(command_exec_params, exec_params)
     dotenv_env = (
@@ -23,7 +23,8 @@ def get_command_with_options(command, aliases, exec_params):
         zenvfile_env=exec_options.get('env', {}),
         blacklist=exec_params.get('env_excludes', {})
     )
-    return command, exec_options
+    docker_exec_options = utils.build_docker_options(exec_options)
+    return command, docker_exec_options
 
 
 def call(config, command):
@@ -49,7 +50,7 @@ def call(config, command):
         # run init commands:
         for init_command in config['run']['init_commands']:
             init_command, init_options = get_command_with_options(
-                 command, config['aliases'], {}
+                command, config['aliases'], {}
             )
             exec_(container_name, init_command, init_options)
 
@@ -68,7 +69,6 @@ def run(image, command, options, path):
         logger.debug(cmd)
         result = subprocess.run(cmd)
     return result.returncode
-
 
 
 def exec_(container_name, command, options):

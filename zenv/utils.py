@@ -34,6 +34,7 @@ def load_dotenv(dotenvfile):
             environments.append(stripped_row)
     return environments
 
+
 def get_config(zenvfile=None):
     if not zenvfile:
         zenvfile = find_file(os.getcwd(), fname=const.DEFAULT_FILENAME)

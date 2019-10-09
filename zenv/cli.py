@@ -96,7 +96,6 @@ def info(zenvfile):
         click.echo(f' - {alias}: {descr}')
 
 
-
 @cli.command()
 @click.option('--zenvfile', default=None, help='Path to Zenvfile')
 def stop(zenvfile):
