@@ -1,4 +1,5 @@
 import os
+import sys
 import click
 import toml
 
@@ -61,7 +62,8 @@ def exec(zenvfile, command):
     """Call some command inside the container"""
 
     config = utils.get_config(zenvfile)
-    core.call(config, command)
+    exit_code = core.call(config, command)
+    sys.exit(exit_code)
 
 
 @cli.command()

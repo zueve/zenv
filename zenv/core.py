@@ -39,7 +39,7 @@ def call(config, command):
     if container_status == const.STATUS_NOT_EXIST:
         options = {'name': container_name, **config['run']['options']}
         run_command, _ = get_command_with_options(
-            config['run']['command'], {}, {})
+            config['run']['command'], config['aliases'], {})
         run(
             image=config['main']['image'],
             command=run_command,
@@ -50,7 +50,7 @@ def call(config, command):
         # run init commands:
         for init_command in config['run']['init_commands']:
             init_command, init_options = get_command_with_options(
-                command, config['aliases'], {}
+                init_command, config['aliases'], {}
             )
             exec_(container_name, init_command, init_options)
 
@@ -59,7 +59,7 @@ def call(config, command):
         logger.debug(cmd)
         subprocess.run(cmd)
 
-    exec_(container_name, command, exec_options)
+    return exec_(container_name, command, exec_options)
 
 
 def run(image, command, options, path):

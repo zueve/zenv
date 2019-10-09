@@ -26,7 +26,7 @@ def test_init(entrypoint):
     assert res.returncode == 0
 
     res = subprocess.run(f'{entrypoint} exec __invalid_command__', shell=True)
-    assert res.returncode == 0
+    assert res.returncode > 0
 
     assert subprocess.run(
         f'{entrypoint} info', shell=True).returncode == 0
