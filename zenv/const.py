@@ -28,7 +28,7 @@ user = "{uid}:{gid}"
 
 [run]
 command = ["__sleep__"]
-init_commands = [["__create_user__"]]
+init_commands = [["__create_group__"], ["__create_user__"]]
 
 [exec]
 env_file = ""
@@ -36,9 +36,9 @@ env_excludes = {env_excludes}
 
 [aliases]
 __sleep__.command = ["sleep", "365d"]
-__sleep__.description = 'Infinity sleep'
+__create_group__.command = ["groupadd", "-o", "--gid", "{gid}", "zenv"]
 __create_user__.command = [
-    "useradd", "-m",  "-r", "-u", "{uid}", "-g", "{gid}", "{id}"
+    "useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "{id}"
 ]
 """
 
