@@ -6,6 +6,7 @@ STATUS_STOPED = 'Stoped'
 STATUS_NOT_EXIST = 'Not_exist'
 
 CONTAINER_PREFIX = 'zenv'
+TEMPLATE_FILENAME = 'template.Zenvfile'
 
 
 CONFIG_TEMPLATE = """
@@ -41,8 +42,3 @@ __create_user__.command = [
     "useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "{id}"
 ]
 """
-
-HIDDEN_FIELDS = [
-    'main.zenvfilepath',
-    'exec.options'
-]

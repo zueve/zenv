@@ -138,10 +138,3 @@ def build_docker_options(params):
             option = [f'--{param}', value]
         options.extend(option)
     return options
-
-
-def delete_path_keys(dictionary, path):
-
-    parent_path, last_key = path[:-1], path[-1]
-    parent = reduce(dict.get, parent_path, dictionary)
-    del parent[last_key]

@@ -22,13 +22,25 @@ def cli():
 @cli.command()
 @click.option('--image', '-i', default=const.DEFAULT_IMAGE,
               help='Docker Image')
+@click.option('--template', '-t', default=None, help='Zenvfile template')
 @click.option('--container-name', '-c', default=None, help='Container name')
-def init(image, container_name):
+def init(image, template, container_name):
     """Initialize Environment: create Zenvfile"""
 
     fpath = os.path.join(os.getcwd(), const.DEFAULT_FILENAME)
     if os.path.exists(fpath):
         raise click.ClickException(f'{fpath} already exist')
+
+    if template:
+        if not os.path.exists(template):
+            raise click.ClickException(f'Tempate ({template}) not exist')
+    else:
+        template = os.path.join(
+            os.path.dirname(__file__), const.TEMPLATE_FILENAME
+        )
+
+    with open(template, 'r') as zenvfile_template:
+        zenv_template = zenvfile_template.read()
 
     name = (
         container_name
@@ -36,21 +48,15 @@ def init(image, container_name):
     )
     image = image if image else const.DEFAULT_IMAGE
 
-    config_str = const.CONFIG_TEMPLATE.format_map(utils.Default(
+    config_str = zenv_template.format_map(utils.Default(
         id=const.CONTAINER_PREFIX,
         image=image,
         container_name=name or 'root',
         env_excludes='["' + '", "'.join(os.environ.keys()) + '"]'
     ))
 
-    # hide some fields
-    config = toml.loads(config_str)
-    for row in const.HIDDEN_FIELDS:
-        path = row.split('.')
-        utils.delete_path_keys(config, path)
-
     with open(fpath, 'w') as f:
-        toml.dump(config, f)
+        f.write(config_str)
     click.echo('Zenvfile created')
 
 
