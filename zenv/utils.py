@@ -56,6 +56,7 @@ def get_config(zenvfile=None):
 
     content = const.CONFIG_TEMPLATE.format_map(params)
     origin_config = toml.loads(content)
+    merge_config(origin_config, origin_config['hidden'])
 
     config = merge_config(config, origin_config)
 

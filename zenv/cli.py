@@ -34,13 +34,11 @@ def init(image, template, container_name):
     if template:
         if not os.path.exists(template):
             raise click.ClickException(f'Tempate ({template}) not exist')
-    else:
-        template = os.path.join(
-            os.path.dirname(__file__), const.TEMPLATE_FILENAME
-        )
 
-    with open(template, 'r') as zenvfile_template:
-        zenv_template = zenvfile_template.read()
+        with open(template, 'r') as zenvfile_template:
+            zenv_template = zenvfile_template.read()
+    else:
+        zenv_template = const.INIT_TEMPLATE
 
     name = (
         container_name

@@ -8,28 +8,23 @@ STATUS_NOT_EXIST = 'Not_exist'
 CONTAINER_PREFIX = 'zenv'
 TEMPLATE_FILENAME = 'template.Zenvfile'
 
+INIT_TEMPLATE = """# Zenvfile - state file for zenv-cli
+# project https://github.com/zueve/zenv
 
-CONFIG_TEMPLATE = """
 [main]
+version = 1
 image = "{image}"
 name = "{id}-{container_name}"
-zenvfilepath = "{zenvfilepath}"
 debug = false
-
-[run.options]
-volume = ["{zenvfilepath}:{zenvfilepath}:rw"]
-detach = "true"
-publish = [] #  ports
-
-[exec.options]
-interactive = "true"
-tty = "{tty}"
-workdir = "{pwd}"
-user = "{uid}:{gid}"
 
 [run]
 command = ["__sleep__"]
 init_commands = [["__create_group__"], ["__create_user__"]]
+
+[run.options]
+volume = ["{zenvfilepath}:{zenvfilepath}:rw"]
+detach = "true"
+publish = [] #  ports like "8888:8888"
 
 [exec]
 env_file = ""
@@ -41,4 +36,17 @@ __create_group__.command = ["groupadd", "-o", "--gid", "{gid}", "zenv"]
 __create_user__.command = [
     "useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "{id}"
 ]
+"""
+
+
+CONFIG_TEMPLATE = INIT_TEMPLATE + """
+[exec.options]
+interactive = "true"
+tty = "{tty}"
+workdir = "{pwd}"
+user = "{uid}:{gid}"
+
+[hidden.main]
+zenvfilepath = "{zenvfilepath}"
+
 """
