@@ -4,10 +4,6 @@ Zenv
 Zenv is container based virtual environments.
 The main goal of Zenv is to simplify access to applications inside container, making it seamless in use like native (host-machine) applications
 
-|Nativ command         |    |Command executed inside container|
-|----------------------|----|---------------------------------|
-|```> <your command>```| -> |```> ze <your command>```        |
-
 ## Usage
 ```shell
 > zenv init
