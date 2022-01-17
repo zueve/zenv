@@ -1,8 +1,8 @@
-Zenv: ZEN ENV
-=============
+Zenv
+====
 
-Zenv is an alternate to docker CLI, created specifically for developers.
-The main goal of Zenv is to simplify running console applications inside container, making it seamless in use like native (host-machine) applications
+Zenv is container based virtual environments.
+The main goal of Zenv is to simplify access to applications inside container, making it seamless in use like native (host-machine) applications
 
 |Nativ command         |    |Command executed inside container|
 |----------------------|----|---------------------------------|
