@@ -19,7 +19,7 @@ toml = "^0.10.0"
 click = "*"
 
 [tool.poetry.dev-dependencies]
-ipython = "^7.0"
+ipython = "^7.16"
 pytest = "*"
 flake8 = "^3.7"
 
