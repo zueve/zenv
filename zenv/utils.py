@@ -3,9 +3,9 @@ import sys
 import logging
 from pathlib import Path
 from contextlib import contextmanager
-from functools import reduce
 import click
 import toml
+from dotenv import parser
 
 from . import const
 
@@ -18,20 +18,13 @@ class Default(dict):
 def load_dotenv(dotenvfile):
     try:
         with open(dotenvfile) as file:
-            rows = file.read().splitlines()
+            environments = [
+                bind.original.string.strip()
+                for bind in parser.parse_stream(file)
+                if not bind.error
+            ]
     except FileNotFoundError:
         raise click.ClickException(f'Env file not found {dotenvfile}')
-
-    environments = []
-    for i, row in enumerate(rows):
-        stripped_row = row.strip()
-        if stripped_row:
-            if '=' not in row:
-                raise click.ClickException(
-                    'Broken .env file. Each row should have `=`.'
-                    f'Line {i}, val `{row}`'
-                )
-            environments.append(stripped_row)
     return environments
 
 
