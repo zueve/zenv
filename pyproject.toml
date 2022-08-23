@@ -19,9 +19,9 @@ toml = "^0.10.0"
 click = "*"
 
 [tool.poetry.dev-dependencies]
-ipython = "^7.0"
 pytest = "*"
 flake8 = "^3.7"
+bpython = "^0.22.1"
 
 [tool.poetry.scripts]
 zenv = 'zenv.cli:cli'
