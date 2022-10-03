@@ -5,7 +5,7 @@ from pathlib import Path
 from contextlib import contextmanager
 import click
 import toml
-from dotenv import parser
+from dotenv import dotenv_values
 
 from . import const
 
@@ -19,9 +19,7 @@ def load_dotenv(dotenvfile):
     try:
         with open(dotenvfile) as file:
             environments = [
-                bind.original.string.strip()
-                for bind in parser.parse_stream(file)
-                if not bind.error
+                f"{k}={v}" for k, v in dotenv_values(stream=file).items()
             ]
     except FileNotFoundError:
         raise click.ClickException(f'Env file not found {dotenvfile}')
