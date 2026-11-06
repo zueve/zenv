@@ -1,181 +1,154 @@
-Zenv
-====
+# Zenv
 
-Zenv is container based virtual environments.
-The main goal of Zenv is to simplify access to applications inside container, making it seamless in use like native (host-machine) applications
-
-## Usage
-```shell
-> zenv init
-Zenv created!
-
-> # run `ls` command inside contaner
-> ze ls
-```
-
-## Motivation
-
-As a developer, when set up a project locally, I usually need to install additional applications on the system. Of course, modern package managers such as poetry, pipenv, npm, cargo, ext, perfectly solve for us most of the problems with dependencies within a single stack of technologies. But they do not allow to solve the problem with the installation of system libraries. If you have a lot of projects that require different versions of system libraries, then you have problems
-
-In production, this problem has long been solved by container insulation, and as a rule, it is a `Docker`. Therefore, many of my colleagues use docker-images and docker-compose, not only to run  services in a production environment but also to develop and debug programs on a local machine
-
-Unfortunately, there are several problems along the way:
-
-- Some of your familiar utilities  may not be preinstalled in the container
-- If you try to install packages in the process, you will encounter the lack of necessary rights
-- Forget about debugging with `print`
-- The main thing is lost the usual experience, you can not use your favorite customized shell
-
-Of course, the problems described above are solved by creating a docker image specifically for developing a specific project, `zenv` just helps to create such containers very simply
-
-## Features
-
-- Simplify: all interaction with the container occurs with one short command: `ze`
-- Zenv automatically forwarded current directory to the container with the same PWD
-- Zenv automatically forwarded current UserID, GroupID to container
-
-  Therefore, files created in the container have the same rights as those created in the native console and you can also use `sudo` to get privileges
-  ```shell
-  > sudo ze <command>
-  ```
-  or
-
-  ```shell
-  > sudo !!
-  ```
-
-- Zenv can forwarded environment vars as is native
-    ```shell
-    > MYVAR=LIVE!!!! ze env
-    ```
-- And of course your could combinate native and containerized commands in Unix pipes
-  ```shell
-  > ze ls | head -7 | ze tail -5
-  ```
-- Minimal performance impact
-- Customization: you can additionally control container parameters using Zenvfile
-
+Zenv runs project commands in a persistent container while preserving the current
+working directory, user and group IDs, environment variables, and standard streams.
+It supports Linux and macOS with Docker installed and running.
 
 ## Install
-  1. Make sure you have the latest version of `Docker` installed
-  2. For linux, make sure you have your user’s [rights are allowed](https://docs.docker.com/install/linux/linux-postinstall/) to interact with doker
-  3. Make sure that you have python version 3.6 or higher
-  4. Execute:
-      ```shell
-      > sudo pip install zenv-cli
-      # or
-      > sudo pip3 install zenv-cli
-      ```
 
-## How It works
-By nature, zenv is a small automated layer over the official docker CLI
+Build with Rust 1.85 or newer:
 
-### init
-
-Command `zenv init` create `Zenvfile` in current directory. This file describes the relationship with the docker image and container that will be created to execute isolated commands.
-
-By default, used image is `ubuntu: latest`.
-But you can change it by setting `-i` flag. For example:
-```shell
-> zenv init -i python:latest
-```
-Or edit `Zenvfile` manually
-
-
-### Execute
-
-Command `zenv exec <COMMAND>` or it shot alias `ze <COMMAND>` run `<COMMAND>` in a container environment. When running the command:
-- Zenv checks current container status (running, stopped, removed), and up container if need.
-- The container run with the command `sleep infinity`. Therefore it will be easily accessible
-- UID and GID that ran the command are pushed into the container. Therefor your could use `sudo ze <COMMAND>`
-- When executing the command, the directory from the path where Zenvfile is located is forwarded to the container as is a current PWD. Therefor your could run `ze` from deep into directories relative to Zenvfile
-- Environment variables are also thrown into the container as a native.
-  ```
-  > MYVAR=SUPER ze env
-  ```
- To avoid conflicts between host and container variables, all installed system variables are placed    in the blacklist when Zenvfile is created, from which editing can be removed
-
-### Other commands
-
-```shell
-> zenv --help
-Usage: zenv [OPTIONS] COMMAND [ARGS]...
-
-  ZENV(Zen-env): Containers manager for developer environment
-
-  Usage:
-
-  > zenv init -i centos:latest & ze cat /etc/redhat-release
-
-Options:
-  --help  Show this message and exit.
-
-Commands:
-  exec      Call some command inside the container
-  info      Show current container info
-  init      Initialize Environment: create Zenvfile
-  rm        Remove container (will stop the container, if need)
-  stop      Stop container
-  stop-all  Stop all zenv containers
+```sh
+cargo install --path . --locked
+install -m 755 bin/ze "${CARGO_HOME:-$HOME/.cargo}/bin/ze"
 ```
 
-## Example install jupyter notebook
-```shell
-> mkgir notebooks
-> cd notebooks
-> zenv init -i python:3.7.3
-```
-After edit Zenvfile to explode notebook ports. Update `ports = []` to `ports = ["8888:8888"]`
+Put that directory on your `PATH`. `zenv` is the Rust executable; `ze` is a POSIX sh
+script that replaces itself with `zenv exec "$@"`.
 
-```
-> sudo ze pip install jupyter numpy scipy matplotlib
-```
-Run notebook
-```
-> ze jupyter notebook --ip 0.0.0.0
-```
-launch your browser with url: http://localhost:8888
+## Usage
 
-Also you could add this commands to Zenvfile:
-```toml
-[run]
-init_commands = [
-  [ "__create_user__"],
-  ["pip", "install", "jupyter", "numpy", "scipy", "matplotlib"]
-]
-
-[commands]
-notebook = ["jupyter", "notebook", "--ip", "0.0.0.0"]
+```sh
+zenv init -i python:3.12
+ze python --version
+MYVAR=hello ze env
+ze ls | head
 ```
 
-And launch notebook with command
+`zenv init` writes a `Zenvfile` in the current directory and never overwrites an
+existing file. Options are `--image/-i`, `--template/-t` and `--container-name/-c`.
+The default image is `ubuntu:latest`; the default name is `zenv-<directory>`.
+A supplied name replaces the directory portion of the default template name.
 
-```
-> ze notebook
+The first execution creates the container and runs its init commands in order.
+Subsequent executions reuse it; a stopped container is started automatically.
+A failed initialization removes only the container created by that attempt.
+Changes to bind-mounted files remain. Creation, startup and cleanup errors are
+reported rather than ignored.
+
+```sh
+zenv exec --zenvfile /path/to/Zenvfile python --help
+zenv info
+zenv stop
+zenv rm
+zenv stop-all --exclude-current
 ```
 
-## Zenvfile
+`exec`, `info`, `stop`, and `rm` accept `--zenvfile`. Without it, Zenv searches the
+current directory and its parents. `stop-all` stops running containers whose names
+start with `zenv-`; `--exclude-current/-e` finds the current configuration and skips
+its container. It attempts all matching stops and reports any failures.
+
+Arguments after the executed command are passed unchanged, including its flags.
+Its exit code is returned to the caller. stdin/stdout/stderr are inherited; TTY
+allocation follows stdin. Commands normally run as the invoking UID:GID; running
+Zenv as root runs commands as root inside the container.
+
+## Zenvfile v1
+
+Sections and options omitted from a file receive defaults. For example:
+
 ```toml
 [main]
-image = "ubuntu:latest"
-name = "zenv-project"    # container name
-debug = false            # for show docker commands
+version = 1
+image = "python:3.12"
+name = "zenv-notebooks"
+debug = false
 
 [run]
-command = [ "__sleep__",]
-init_commands = [ [ "__create_user__",],]
-
-[exec]
-env_file = ""
-env_excludes = [ "TMPDIR",]
+command = ["__sleep__"]
+init_commands = [
+    ["__create_group__"],
+    ["__create_user__"],
+    ["pip", "install", "jupyter"],
+]
 
 [run.options]
-volume = [ "{zenvfilepath}:{zenvfilepath}:rw",]
-detach = "true"
-publish = []
+volume = ["{zenvfilepath}:{zenvfilepath}:rw"]
+detach = true
+publish = ["8888:8888"]
 
-[commands]
-__sleep__ = [ "sleep", "365d",]
-__create_user__ = [ "useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "zenv",]
+[exec]
+env_file = ".env"
+env_excludes = ["PATH", "HOME", "USER", "SHELL"]
+
+[exec.options]
+interactive = true
+# tty = false # Optional override; otherwise detected from stdin
+workdir = "{pwd}"
+user = "{uid}:{gid}"
+env = ["APP_MODE=development"]
+
+[aliases.notebook]
+command = ["jupyter", "notebook", "--ip", "0.0.0.0"]
+description = "Start Jupyter"
+
+[aliases.install]
+command = ["pip", "install"]
+
+[aliases.install.exec.options]
+user = "0:0"
 ```
 
+Run aliases with `ze notebook` or `ze install numpy`. Expansion occurs once and
+additional arguments are appended. Alias `exec` settings override project settings;
+option tables merge, while arrays replace their defaults.
+
+The builtin aliases are `__sleep__`, `__create_group__`, and `__create_user__`.
+Init commands run as the container's default user (normally root), unless their
+alias overrides execution options. Builtin setup reuses existing UID/GID entries,
+including root, and creates missing accounts with `getent`, `groupadd` and
+`useradd`. If the name `zenv` is occupied, it uses `zenv-<id>`. Explicit alias
+commands are executed as written. Other images can override `init_commands`.
+
+Supported runtime placeholders are `{zenvfilepath}` (project directory), `{pwd}`
+(invocation directory), `{uid}`, `{gid}`, and `{tty}`. Unknown placeholders are
+preserved; doubled braces escape a placeholder for one interpolation pass.
+Custom init templates must be valid TOML and additionally support `{image}`,
+`{id}` (`zenv`), and `{container_name}`. An empty `exec.env_excludes = []` is filled
+with the host variable names during initialization; a nonempty array is preserved.
+Templates are parsed and serialized as TOML, so formatting and comments may change.
+
+Environment precedence, from highest to lowest, is host variables not listed in
+`env_excludes`, `exec.options.env`, then `env_file`. Exclusions affect only host
+variables. `init` excludes the host variable names present when it runs.
+Dotenv paths are relative to the invocation directory; quoted multiline values
+are supported. Reading dotenv does not mutate the host process environment.
+
+Docker options accept TOML booleans, strings, integers, or arrays of repeated
+string values. Strings are passed literally, including `"true"` and `"false"`.
+`exec.options.env` accepts only an array of strings. `run.options.cidfile` is
+reserved for ownership tracking. Set the container name in `main.name`;
+conflicting `run.options.name` values are rejected. Debug output reports Docker
+operations without printing command arguments or environment secrets.
+
+## Development
+
+```sh
+cargo test --locked
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --test docker_live -- --ignored --test-threads=1
+```
+
+Normal tests use fake runtimes and fake CLI processes and need no Docker daemon.
+The explicitly enabled `docker_live` tests need a working Docker CLI and daemon;
+they create uniquely named containers and clean up only their own resources.
+
+The library separates configuration, application logic and runtime adapters.
+Implement `zenv::runtime::ContainerRuntime` and inject it into `zenv::app` to use
+another backend. Docker command syntax and response parsing live in
+`zenv::docker::DockerCli`. Extension options are interpreted by the adapter;
+another backend should reject options it does not support.
+
+All project Rust code forbids `unsafe`. Dependencies may use it internally.

@@ -1,0 +1,34 @@
+[main]
+version = 1
+image = "{image}"
+name = "{id}-{container_name}"
+debug = false
+
+[run]
+command = ["__sleep__"]
+init_commands = [["__create_group__"], ["__create_user__"]]
+
+[run.options]
+volume = ["{zenvfilepath}:{zenvfilepath}:rw"]
+detach = true
+publish = []
+
+[exec]
+env_file = ""
+env_excludes = []
+
+[exec.options]
+interactive = true
+workdir = "{pwd}"
+user = "{uid}:{gid}"
+
+[aliases]
+__sleep__.command = ["sleep", "365d"]
+__create_group__.command = ["sh", "-c", '''getent group "$1" >/dev/null && exit 0
+name=zenv
+if getent group "$name" >/dev/null; then name=zenv-$1; fi
+exec groupadd -o --gid "$1" "$name"''', "zenv", "{gid}"]
+__create_user__.command = ["sh", "-c", '''getent passwd "$1" >/dev/null && exit 0
+name=zenv
+if getent passwd "$name" >/dev/null; then name=zenv-$1; fi
+exec useradd -m -r -u "$1" -g "$2" "$name"''', "zenv", "{uid}", "{gid}"]
