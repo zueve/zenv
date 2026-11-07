@@ -95,6 +95,73 @@ Command `zenv exec <COMMAND>` or it shot alias `ze <COMMAND>` run `<COMMAND>` in
   ```
  To avoid conflicts between host and container variables, all installed system variables are placed    in the blacklist when Zenvfile is created, from which editing can be removed
 
+### Configuration changes
+
+Zenv records a fingerprint of the container creation settings in the Docker label
+`zenv.config-hash`. It covers the image, run options, startup command and init
+commands, including the aliases and execution settings used by initialization.
+
+If these settings change, Zenv prints a warning to stderr and asks whether to
+continue using the existing container (default: no). The same check applies to
+containers created before fingerprint tracking. Confirmation happens before
+starting the container or executing the command. Accepting preserves the
+command's stdout and exit code. With piped or noninteractive stdin, a mismatch
+stops execution without reading input.
+
+Fingerprint checking is enabled by default and can be disabled:
+
+```toml
+[run]
+check_zenvfile_changes = false
+```
+
+This disables comparison, warnings and confirmation, including for scripts and
+pipes. New containers still receive a fingerprint so checking can be re-enabled
+later. Changing this flag does not require recreating the container.
+
+To apply updated creation settings, run `zenv rm` and retry. The next execution
+creates a container with the updated configuration. Files in the mounted project
+directory remain; changes made only inside the removed container are discarded.
+
+Changing ordinary exec settings, host environment variables, UID/GID, TTY or the
+current subdirectory does not require recreating the container. Comments, TOML
+key order, alias descriptions and unused aliases do not affect the fingerprint.
+The fingerprint tracks configuration declarations, not changes inside image tags
+or files referenced by init commands.
+
+### Networks
+
+Set a named network in the existing run options:
+
+```toml
+[run]
+manage_network = true
+
+[run.options]
+network = "project-dev"
+```
+
+`run.manage_network` defaults to `true`. Set it to `false` to disable automatic
+network creation and deletion. The configured network is still passed to Docker
+and must already exist. This switch takes effect immediately and does not
+require recreating the container.
+
+Before creating the container, Zenv creates a missing network with the default
+bridge driver. Existing networks are reused. Other containers can join the same
+network through their Docker or Compose configuration. A list of network names
+is also supported.
+
+After `zenv rm` successfully removes the container, Zenv removes unused networks
+listed explicitly in the current `run.options.network` that were created by
+Zenv. Networks created outside Zenv are preserved.
+Networks still referenced by other containers, including stopped containers,
+are preserved too. If `run.options.network` is absent, no networks are created
+or removed. Other networks attached to the container are left untouched.
+
+Built-in modes (`bridge`, `host`, `none`, `default`) and `container:<name-or-id>`
+are passed through without automatic network creation or removal. Extended
+Docker network syntax is passed through and requires an existing network.
+
 ### Other commands
 
 ```shell

@@ -7,7 +7,7 @@ import click
 import toml
 from dotenv import parser
 
-from . import const
+from . import const, fingerprint
 
 
 class Default(dict):
@@ -34,6 +34,23 @@ def get_config(zenvfile=None):
     if not zenvfile:
         raise click.ClickException('Zenvfile don\'t find. Make `zenv init`')
 
+    zenvfile = os.path.abspath(zenvfile)
+    source = Path(zenvfile).read_text()
+
+    # Distinct symbols retain active placeholders while unescaping TOML braces.
+    symbolic_params = Default(
+        uid='__zenv_runtime_uid__', gid='__zenv_runtime_gid__',
+        pwd='__zenv_runtime_pwd__', tty='__zenv_runtime_tty__',
+        zenvfilepath='__zenv_project_directory__', env_excludes='[]',
+    )
+    declared_config = merge_config(
+        toml.loads(source.format_map(symbolic_params)),
+        toml.loads(const.CONFIG_TEMPLATE.format_map(symbolic_params)),
+    )
+    creation_hash = fingerprint.config_hash(
+        declared_config, os.path.dirname(zenvfile)
+    )
+
     params = Default(
         zenvfilepath=os.path.dirname(zenvfile),
         pwd=os.getcwd(),
@@ -43,7 +60,7 @@ def get_config(zenvfile=None):
         env_excludes='[]'
     )
 
-    content = Path(zenvfile).read_text().format_map(params)
+    content = source.format_map(params)
 
     config = toml.loads(content)
 
@@ -52,6 +69,10 @@ def get_config(zenvfile=None):
     merge_config(origin_config, origin_config['hidden'])
 
     config = merge_config(config, origin_config)
+    for flag in ('manage_network', 'check_zenvfile_changes'):
+        if not isinstance(config['run'][flag], bool):
+            raise click.ClickException('run.{} must be a boolean'.format(flag))
+    config['main']['config_hash'] = creation_hash
 
     # init logging
     if 'debug' in config['main'] and config['main']['debug']:
