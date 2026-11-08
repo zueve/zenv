@@ -171,6 +171,20 @@ fn reports_configuration_errors_without_panicking() {
 fn info_lists_public_aliases_and_exact_container_status() {
     let directory = tempfile::tempdir().unwrap();
     write_config(directory.path());
+    let path = directory.path().join("Zenvfile");
+    let explicit_description = "description".repeat(10);
+    fs::write(
+        &path,
+        format!(
+            "{}\nplain.command = ['echo', 'plain arg']\n\
+         long.command = ['echo', '{}']\n\
+         described.command = ['true']\n\
+         described.description = '{explicit_description}'\n",
+            fs::read_to_string(&path).unwrap(),
+            "界".repeat(85),
+        ),
+    )
+    .unwrap();
     let binaries = fake_docker(directory.path());
     let mut cmd = command(directory.path());
     with_fake_path(&mut cmd, binaries.path());
@@ -181,6 +195,15 @@ fn info_lists_public_aliases_and_exact_container_status() {
     assert!(stdout.contains("Container: zenv-test"), "{stdout}");
     assert!(stdout.contains("Status: Running"), "{stdout}");
     assert!(stdout.contains("hello: Say hello"), "{stdout}");
+    assert!(stdout.contains(" - plain: echo plain arg\n"), "{stdout}");
+    assert!(
+        stdout.contains(&format!(" - long: echo {} ...\n", "界".repeat(69))),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(" - described: {explicit_description}\n")),
+        "{stdout}"
+    );
     assert!(!stdout.contains("_hidden"), "{stdout}");
 }
 

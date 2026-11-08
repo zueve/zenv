@@ -65,6 +65,15 @@ pub struct Alias {
     pub exec: ExecOptions,
 }
 
+impl Alias {
+    /// The configured description, or the command when none was provided.
+    pub fn description(&self) -> String {
+        self.description
+            .clone()
+            .unwrap_or_else(|| self.command.join(" "))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub fingerprint: String,
@@ -76,6 +85,14 @@ pub struct Config {
 }
 
 impl Config {
+    /// Public aliases in name order; names beginning with an underscore are internal.
+    pub fn public_aliases(&self) -> impl Iterator<Item = (&str, &Alias)> {
+        self.aliases
+            .iter()
+            .filter(|(name, _)| !name.starts_with('_'))
+            .map(|(name, alias)| (name.as_str(), alias))
+    }
+
     /// Build a runtime request using only the resolved configuration.
     pub fn run_request(&self) -> RunRequest {
         RunRequest {

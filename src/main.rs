@@ -146,23 +146,17 @@ fn info(config: &Config, container: Option<&zenv::runtime::Container>) -> String
         config.main.name,
         container.map_or_else(|| "Not_exist".to_owned(), |c| c.state.to_string()),
     );
-    let aliases: Vec<_> = config
-        .aliases
-        .iter()
-        .filter(|(name, _)| !name.starts_with('_'))
-        .collect();
+    let aliases: Vec<_> = config.public_aliases().collect();
     if !aliases.is_empty() {
         text.push_str("Aliases:\n");
     }
     for (name, alias) in aliases {
-        let description = alias.description.clone().unwrap_or_else(|| {
-            let command = alias.command.join(" ");
-            if command.chars().count() > 80 {
-                format!("{} ...", command.chars().take(74).collect::<String>())
-            } else {
-                command
-            }
-        });
+        let description = alias.description();
+        let description = if alias.description.is_none() && description.chars().count() > 80 {
+            format!("{} ...", description.chars().take(74).collect::<String>())
+        } else {
+            description
+        };
         writeln!(&mut text, " - {name}: {description}").expect("writing to a String cannot fail");
     }
     text
