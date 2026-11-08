@@ -8,6 +8,8 @@ use std::{
 };
 
 use clap::{Args, Parser, Subcommand};
+
+mod interaction;
 use zenv::{
     Result, app,
     config::{self, Config, ConfigLoader, FileConfigLoader, HostContext},
@@ -91,7 +93,12 @@ fn run(cli: Cli, loader: &dyn ConfigLoader) -> Result<i32> {
         }
         Commands::Exec { config, command } => {
             let config = loader.load(config.zenvfile.as_deref())?;
-            return app::execute(&DockerCli::new(config.main.debug), &config, &command);
+            return app::execute(
+                &DockerCli::new(config.main.debug),
+                &config,
+                &command,
+                &mut interaction::confirm_recreation,
+            );
         }
         Commands::Info(path) => {
             let config = loader.load(path.zenvfile.as_deref())?;
@@ -111,7 +118,7 @@ fn run(cli: Cli, loader: &dyn ConfigLoader) -> Result<i32> {
         }
         Commands::Rm(path) => {
             let config = loader.load(path.zenvfile.as_deref())?;
-            app::remove(&DockerCli::new(config.main.debug), &config.main.name)?;
+            app::remove(&DockerCli::new(config.main.debug), &config)?;
         }
         Commands::StopAll {
             config,

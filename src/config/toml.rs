@@ -17,6 +17,8 @@ pub(super) struct Document {
 
 #[derive(Deserialize)]
 pub(super) struct RunSettings {
+    pub manage_network: bool,
+    pub check_zenvfile_changes: bool,
     pub command: Vec<String>,
     pub init_commands: Vec<Vec<String>>,
     pub options: Options,

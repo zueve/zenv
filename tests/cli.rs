@@ -3,9 +3,10 @@
 use std::{
     ffi::OsString,
     fs,
+    io::{Seek, SeekFrom, Write},
     os::unix::fs::PermissionsExt,
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 
 use tempfile::TempDir;
@@ -34,6 +35,7 @@ image = "example:latest"
 name = "zenv-test"
 [run]
 init_commands = []
+check_zenvfile_changes = false
 [exec]
 env_excludes = ["SECRET"]
 [exec.options]
@@ -54,11 +56,25 @@ fn fake_docker(directory: &Path) -> TempDir {
         r#"#!/bin/sh
 case "$1" in
     container|ps)
-        printf '%s\n' '{"ID":"existing-id","Names":"zenv-test","State":"running"}'
+        if [ "$2" = inspect ]; then
+            if [ -n "$FAKE_FINGERPRINT" ]; then
+                printf '{"zenv.config-hash":"%s"}\n' "$FAKE_FINGERPRINT"
+            else
+                printf '{}\n'
+            fi
+        else
+            printf '%s\n' '{"ID":"existing-id","Names":"zenv-test","State":"running"}'
+        fi
         ;;
     exec)
         printf '%s\000' "$@" > "$FAKE_LOG"
+        if [ "$FAKE_READ_STDIN" = 1 ]; then cat; fi
         exit 37
+        ;;
+    stop|rm)
+        if [ -n "$FAKE_ACTION_LOG" ]; then
+            printf '%s\000' "$@" >> "$FAKE_ACTION_LOG"
+        fi
         ;;
     *)
         printf 'unexpected Docker operation: %s\n' "$1" >&2
@@ -243,4 +259,115 @@ fn exec_preserves_non_utf8_arguments() {
         .unwrap();
     assert_eq!(output.status.code(), Some(37), "{}", stderr(&output));
     assert!(logged_args(&log).ends_with(&[vec![b'a', 0xff, b'b']]));
+}
+
+fn enable_fingerprint_check(directory: &Path) {
+    let path = directory.join("Zenvfile");
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        path,
+        source.replace(
+            "check_zenvfile_changes = false",
+            "check_zenvfile_changes = true",
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn noninteractive_mismatch_does_not_read_input_or_execute() {
+    for saved_hash in [None, Some("outdated")] {
+        let directory = tempfile::tempdir().unwrap();
+        write_config(directory.path());
+        enable_fingerprint_check(directory.path());
+        let binaries = fake_docker(directory.path());
+        let log = directory.path().join("argv");
+        let mut input = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(directory.path().join("input"))
+            .unwrap();
+        input.write_all(b"command input\n").unwrap();
+        input.seek(SeekFrom::Start(0)).unwrap();
+        let mut cmd = command(directory.path());
+        with_fake_path(&mut cmd, binaries.path());
+        if let Some(hash) = saved_hash {
+            cmd.env("FAKE_FINGERPRINT", hash);
+        } else {
+            cmd.env_remove("FAKE_FINGERPRINT");
+        }
+        let output = cmd
+            .env("FAKE_LOG", &log)
+            .stdin(Stdio::from(input.try_clone().unwrap()))
+            .args(["exec", "cat"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("Warning:"), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("check_zenvfile_changes = false"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(output.stdout.is_empty());
+        assert_eq!(input.stream_position().unwrap(), 0);
+        assert!(!log.exists());
+    }
+}
+
+#[test]
+fn disabled_check_preserves_piped_input_and_exit_code() {
+    let directory = tempfile::tempdir().unwrap();
+    write_config(directory.path());
+    let binaries = fake_docker(directory.path());
+    let log = directory.path().join("argv");
+    let mut cmd = command(directory.path());
+    with_fake_path(&mut cmd, binaries.path());
+    let mut child = cmd
+        .env("FAKE_LOG", &log)
+        .env("FAKE_READ_STDIN", "1")
+        .args(["exec", "cat"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"command input\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(37), "{}", stderr(&output));
+    assert_eq!(output.stdout, b"command input\n");
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(log.exists());
+}
+
+#[test]
+fn info_and_removal_bypass_fingerprint_confirmation() {
+    let directory = tempfile::tempdir().unwrap();
+    write_config(directory.path());
+    enable_fingerprint_check(directory.path());
+    let binaries = fake_docker(directory.path());
+    let actions = directory.path().join("actions");
+    for operation in ["info", "rm"] {
+        let mut cmd = command(directory.path());
+        with_fake_path(&mut cmd, binaries.path());
+        let output = cmd
+            .env("FAKE_ACTION_LOG", &actions)
+            .env("FAKE_FINGERPRINT", "outdated")
+            .arg(operation)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    }
+    let args = logged_args(&actions);
+    assert!(
+        args.windows(3)
+            .any(|args| args == [b"rm".to_vec(), b"--".to_vec(), b"existing-id".to_vec()])
+    );
 }

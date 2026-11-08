@@ -13,6 +13,7 @@ use crate::{
 
 mod context;
 mod environment;
+mod fingerprint;
 mod init;
 mod loader;
 mod template;
@@ -43,6 +44,9 @@ pub struct MainConfig {
 
 #[derive(Clone, Debug)]
 pub struct RunConfig {
+    pub manage_network: bool,
+    pub check_zenvfile_changes: bool,
+    pub networks: Vec<String>,
     pub command: Vec<String>,
     pub init_commands: Vec<ExecRequest>,
     pub options: Options,
@@ -64,6 +68,7 @@ pub struct Alias {
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub fingerprint: String,
     pub main: MainConfig,
     pub run: RunConfig,
     pub exec: ExecOptions,
@@ -75,6 +80,7 @@ impl Config {
     /// Build a runtime request using only the resolved configuration.
     pub fn run_request(&self) -> RunRequest {
         RunRequest {
+            fingerprint: Some(self.fingerprint.clone()),
             name: self.main.name.clone(),
             image: self.main.image.clone(),
             command: self.run.command.iter().map(OsString::from).collect(),

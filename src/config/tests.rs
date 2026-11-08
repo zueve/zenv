@@ -692,3 +692,219 @@ fn non_utf8_arguments_and_environment_are_preserved() {
     row.push(bytes);
     assert_eq!(request.env, [row]);
 }
+
+fn fingerprint_of(directory: &Path, source: &str, host: &HostContext) -> String {
+    fs::write(directory.join(DEFAULT_FILENAME), source).unwrap();
+    FileConfigLoader::new(host).load(None).unwrap().fingerprint
+}
+
+#[test]
+fn run_policies_default_to_true_and_do_not_change_fingerprint() {
+    let (directory, host, config) = config("");
+    assert!(config.run.manage_network);
+    assert!(config.run.check_zenvfile_changes);
+    assert!(config.run.networks.is_empty());
+    assert_eq!(
+        config.run_request().fingerprint.as_deref(),
+        Some(config.fingerprint.as_str())
+    );
+    assert_eq!(config.fingerprint.len(), 64);
+    assert!(
+        config
+            .fingerprint
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    );
+    for flag in ["manage_network", "check_zenvfile_changes"] {
+        let source = format!("[run]\n{flag} = false\n");
+        assert_eq!(
+            fingerprint_of(directory.path(), &source, &host),
+            config.fingerprint
+        );
+        let loaded = FileConfigLoader::new(&host).load(None).unwrap();
+        assert_eq!(loaded.run.manage_network, flag != "manage_network");
+        assert_eq!(
+            loaded.run.check_zenvfile_changes,
+            flag != "check_zenvfile_changes"
+        );
+        for invalid in ["'false'", "0", "[]"] {
+            fs::write(
+                directory.path().join(DEFAULT_FILENAME),
+                format!("[run]\n{flag} = {invalid}\n"),
+            )
+            .unwrap();
+            let error = FileConfigLoader::new(&host).load(None).unwrap_err();
+            assert!(error.to_string().contains(flag), "{error}");
+        }
+    }
+}
+
+#[test]
+fn configured_networks_preserve_explicit_names_without_filtering() {
+    for (value, expected) in [
+        ("'project-dev'", vec!["project-dev"]),
+        (
+            "['project-dev', 'project-dev', 'bridge', 'name=dev,alias=app']",
+            vec!["project-dev", "project-dev", "bridge", "name=dev,alias=app"],
+        ),
+        ("[]", vec![]),
+        ("true", vec![]),
+    ] {
+        let (_directory, _host, config) = config(&format!("[run.options]\nnetwork = {value}"));
+        assert_eq!(config.run.networks, expected);
+        assert!(config.run.options.contains_key("network"));
+    }
+}
+
+const FINGERPRINT_SETUP: &str = r#"
+[main]
+image = "example:latest"
+[run]
+command = ["stay"]
+init_commands = [["setup", "--first"]]
+[run.options]
+publish = ["8000:8000"]
+[aliases.stay]
+command = ["sleep", "365d"]
+[aliases.setup]
+command = ["provision", "{uid}", "{gid}", "{pwd}", "{tty}"]
+description = "Initialize"
+[aliases.setup.exec.options]
+user = "0:0"
+env = ["MODE=setup"]
+[aliases.unused]
+command = ["unused-command"]
+"#;
+
+#[test]
+fn creation_declarations_change_the_fingerprint() {
+    let (directory, host) = project(FINGERPRINT_SETUP);
+    let previous = fingerprint_of(directory.path(), FINGERPRINT_SETUP, &host);
+    for (before, after) in [
+        ("example:latest", "example:new"),
+        ("8000:8000", "9000:9000"),
+        ("[run.options]", "[run.options]\nnetwork = 'another'"),
+        (
+            "[run.options]",
+            "[run.options]\nvolume = ['/other:/project']",
+        ),
+        ("[run.options]", "[run.options]\ndetach = false"),
+        ("365d", "30d"),
+        ("--first", "--changed"),
+        ("provision", "different-provisioner"),
+        ("0:0", "123:456"),
+        ("MODE=setup", "MODE=changed"),
+    ] {
+        let source = FINGERPRINT_SETUP.replace(before, after);
+        assert_ne!(
+            fingerprint_of(directory.path(), &source, &host),
+            previous,
+            "{before}"
+        );
+    }
+}
+
+#[test]
+fn unrelated_configuration_does_not_change_the_fingerprint() {
+    let (directory, host) = project(FINGERPRINT_SETUP);
+    let previous = fingerprint_of(directory.path(), FINGERPRINT_SETUP, &host);
+    for source in [
+        FINGERPRINT_SETUP.replace("[main]", "[main]\nname = 'other'\ndebug = true"),
+        FINGERPRINT_SETUP.replace("unused-command", "other-unused-command"),
+        FINGERPRINT_SETUP.replace("Initialize", "New description"),
+        format!(
+            "{FINGERPRINT_SETUP}\n[exec]\nenv_excludes = ['KEY']\n[exec.options]\nuser = '42'\nenv = ['KEY=new']"
+        ),
+        format!("{FINGERPRINT_SETUP}\n[aliases.stay.exec.options]\nuser = '123'"),
+    ] {
+        assert_eq!(fingerprint_of(directory.path(), &source, &host), previous);
+    }
+}
+
+#[test]
+fn comments_key_order_and_explicit_defaults_have_the_same_fingerprint() {
+    let (directory, host, config) = config("");
+    let source = r#"
+# Equivalent settings in another order.
+[run.options]
+publish = []
+detach = true
+volume = ["{zenvfilepath}:{zenvfilepath}:rw"]
+[run]
+init_commands = [["__create_group__"], ["__create_user__"]]
+command = ["__sleep__"]
+manage_network = true
+check_zenvfile_changes = true
+[main]
+image = "ubuntu:latest"
+debug = false
+version = 1
+"#;
+    assert_eq!(
+        fingerprint_of(directory.path(), source, &host),
+        config.fingerprint
+    );
+}
+
+#[test]
+fn invocation_values_and_relative_config_paths_do_not_change_fingerprint() {
+    let (directory, mut host, config) = config(FINGERPRINT_SETUP);
+    let child = directory.path().join("nested");
+    fs::create_dir(&child).unwrap();
+    host.cwd = child;
+    host.uid = 987;
+    host.gid = 654;
+    host.tty = true;
+    host.environment.insert("CHANGED".into(), "host".into());
+    let loader = FileConfigLoader::new(&host);
+    let nested = loader.load(None).unwrap();
+    assert_eq!(nested.fingerprint, config.fingerprint);
+    assert_ne!(nested.exec.options["user"], config.exec.options["user"]);
+    assert_eq!(
+        loader
+            .load(Some(Path::new("../Zenvfile")))
+            .unwrap()
+            .fingerprint,
+        config.fingerprint
+    );
+    let (_other_directory, _other_host, other) = self::config(FINGERPRINT_SETUP);
+    assert_ne!(other.fingerprint, config.fingerprint);
+}
+
+#[test]
+fn active_and_escaped_init_placeholders_have_different_fingerprints() {
+    let active =
+        "[run]\ninit_commands = [['work']]\n[aliases]\nwork = { command = ['echo', '{uid}'] }";
+    let (directory, host, config) = config(active);
+    let literal = active.replace("'{uid}'", "'{{uid}}'");
+    assert_ne!(
+        fingerprint_of(directory.path(), &literal, &host),
+        config.fingerprint
+    );
+    let loaded = FileConfigLoader::new(&host).load(None).unwrap();
+    assert_eq!(loaded.run.init_commands[0].command, ["echo", "{uid}"]);
+}
+
+#[test]
+fn equivalent_expanded_startup_commands_have_the_same_fingerprint() {
+    let source = "[run]\ncommand = ['stay', '365d']\n[aliases.stay]\ncommand = ['sleep']";
+    let (directory, host, config) = config(source);
+    let expanded = source.replace("['stay', '365d']", "['sleep', '365d']");
+    assert_eq!(
+        fingerprint_of(directory.path(), &expanded, &host),
+        config.fingerprint
+    );
+}
+
+#[test]
+fn env_file_contents_do_not_change_the_fingerprint() {
+    let source = "[run]\ninit_commands = [['setup']]\n[exec]\nenv_file = '.env'\n[aliases.setup]\ncommand = ['setup-command']\n[aliases.setup.exec]\nenv_file = '.env'";
+    let (directory, host) = project(source);
+    let path = directory.path().join(".env");
+    fs::write(&path, "KEY=before\n").unwrap();
+    let before = FileConfigLoader::new(&host).load(None).unwrap();
+    fs::write(path, "KEY=after\n").unwrap();
+    let after = FileConfigLoader::new(&host).load(None).unwrap();
+    assert_eq!(before.fingerprint, after.fingerprint);
+    assert_ne!(before.exec.env, after.exec.env);
+}

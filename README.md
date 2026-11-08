@@ -143,6 +143,64 @@ reserved for ownership tracking. Set the container name in `main.name`;
 conflicting `run.options.name` values are rejected. Debug output reports Docker
 operations without printing command arguments or environment secrets.
 
+## Configuration changes
+
+Zenv records a SHA-256 fingerprint of container creation settings in the Docker
+label `zenv.config-hash`. It covers the project directory, image, run options,
+startup command and initialization commands, including their alias execution
+settings. It tracks declarations: ordinary exec settings, host environment,
+UID/GID/TTY, invocation subdirectory, comments and unused aliases do not change
+it. Image tag contents and files referenced by commands are not fingerprinted.
+
+When an existing container has a different fingerprint, or none, Zenv warns on
+stderr and asks whether to recreate it (default: no). Answer `y` to remove the
+old container, create it with the current settings, initialize it and execute
+the original command. Answer `n` or press Enter to use the existing container.
+The adapter checks replacement and initialization options locally before any
+removal, so invalid runtime option syntax leaves the old container untouched.
+Recreation discards files stored only inside the container; mounted project
+files remain. A failure during removal or creation prevents command execution.
+
+With piped or noninteractive stdin, a mismatch fails without reading input.
+For scripts that intentionally reuse an existing container, disable checking:
+
+```toml
+[run]
+check_zenvfile_changes = false
+```
+
+Checking defaults to `true`. Disabling it suppresses comparison, warnings and
+confirmation; newly created containers still receive a fingerprint. `info`,
+`stop` and `rm` do not check fingerprints. Changing this flag does not require
+recreating a container.
+
+## Networks
+
+```toml
+[run]
+manage_network = true
+
+[run.options]
+network = "project-dev"
+```
+
+`manage_network` defaults to `true`. Before creating a container, Zenv attempts
+to create each explicitly configured network with `zenv.managed-network=true`.
+Network names can be a string or an array. Existing containers do not trigger
+network creation. No network creation is rolled back after a failed launch.
+
+After successful container removal, `zenv rm` attempts to remove the networks
+listed in the current config, even when the container was already absent.
+These operations make no existence, ownership or usage checks; Docker decides
+whether they are allowed. Their output and failures are ignored. An unused
+network created outside Zenv may therefore be removed too.
+
+Set `manage_network = false` to disable automatic creation and deletion,
+including when using system network modes or extended Docker network syntax.
+The configured network options are still passed to the runtime. No network
+operations occur when `run.options.network` is absent. Both policy flags require
+TOML booleans and take effect without changing the creation fingerprint.
+
 ## Development
 
 ```sh
@@ -173,7 +231,12 @@ precedence is host over Zenvfile over `.env`; exclusions apply to host variables
 
 Implement `zenv::runtime::ContainerRuntime` and inject it into `zenv::app` to use
 another backend. Docker command syntax and response parsing live in
-`zenv::docker::DockerCli`. Extension options are interpreted by the adapter;
+`zenv::docker::DockerCli`, with submodules for processes, options, containers
+and networks. The application receives a confirmation callback for changed
+settings; terminal interaction stays in the CLI. Runtime adapters store and
+return configuration fingerprints and implement best-effort network operations.
+They also provide local request validation before application mutations.
+Extension options are interpreted by the adapter;
 another backend should reject options it does not support.
 
 All project Rust code forbids `unsafe`. Dependencies may use it internally.

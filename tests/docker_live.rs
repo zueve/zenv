@@ -73,11 +73,20 @@ impl Sandbox {
 
     fn execute(&self, args: &[&str]) -> i32 {
         let args = args.iter().map(OsString::from).collect::<Vec<_>>();
-        app::execute(self, &self.config, &args).unwrap()
+        app::execute(self, &self.config, &args, &mut || {
+            panic!("the live sandbox container must have a matching fingerprint")
+        })
+        .unwrap()
     }
 }
 
 impl ContainerRuntime for Sandbox {
+    fn validate_run(&self, request: &RunRequest) -> Result<()> {
+        self.runtime.validate_run(request)
+    }
+    fn validate_exec(&self, request: &ExecRequest) -> Result<()> {
+        self.runtime.validate_exec(request)
+    }
     fn inspect(&self, name: &str) -> Result<Option<Container>> {
         self.runtime.inspect(name)
     }
@@ -100,6 +109,12 @@ impl ContainerRuntime for Sandbox {
     }
     fn list_running(&self) -> Result<Vec<Container>> {
         self.runtime.list_running()
+    }
+    fn create_networks(&self, names: &[String]) {
+        self.runtime.create_networks(names);
+    }
+    fn remove_networks(&self, names: &[String]) {
+        self.runtime.remove_networks(names);
     }
 }
 
@@ -165,7 +180,7 @@ fn lifecycle_identity_workdir_environment_and_streams() {
     assert_eq!(output.stdout, b"through stdin\n");
     assert_eq!(output.stderr, b"error");
 
-    app::remove(&sandbox, &sandbox.config.main.name).unwrap();
+    app::remove(&sandbox, &sandbox.config).unwrap();
     assert!(
         sandbox
             .inspect(&sandbox.config.main.name)
@@ -180,7 +195,10 @@ fn lifecycle_identity_workdir_environment_and_streams() {
 #[ignore = "requires Docker CLI and daemon"]
 fn initialization_failure_removes_created_container() {
     let sandbox = Sandbox::new(true);
-    let error = app::execute(&sandbox, &sandbox.config, &["true".into()]).unwrap_err();
+    let error = app::execute(&sandbox, &sandbox.config, &["true".into()], &mut || {
+        panic!("new sandbox must not request recreation")
+    })
+    .unwrap_err();
     assert!(error.to_string().contains("17"));
     assert!(
         sandbox
