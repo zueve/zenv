@@ -234,9 +234,9 @@ fn exec_forwards_arguments_environment_and_exit_code() {
     ]
     .map(|value| value.as_bytes().to_vec());
     assert!(args.ends_with(&expected), "{args:?}");
-    assert!(args.contains(&b"HOST_MARKER=value with spaces\nand newline".to_vec()));
-    assert!(args.contains(&b"FROM_CONFIG=config".to_vec()));
-    assert!(!args.iter().any(|arg| arg.starts_with(b"SECRET=")));
+    assert!(args.contains(&b"--env=HOST_MARKER=value with spaces\nand newline".to_vec()));
+    assert!(args.contains(&b"--env=FROM_CONFIG=config".to_vec()));
+    assert!(!args.iter().any(|arg| arg.starts_with(b"--env=SECRET=")));
     assert!(!directory.path().join("dangerous").exists());
 }
 
@@ -282,6 +282,115 @@ fn exec_preserves_non_utf8_arguments() {
         .unwrap();
     assert_eq!(output.status.code(), Some(37), "{}", stderr(&output));
     assert!(logged_args(&log).ends_with(&[vec![b'a', 0xff, b'b']]));
+}
+
+#[test]
+fn scalar_and_mixed_array_options_are_forwarded_uniformly() {
+    for (settings, expected) in [
+        (
+            "interactive = true\nuser = 42\ncustom-option = false\n",
+            vec!["--custom-option=false", "--interactive=true", "--user=42"],
+        ),
+        (
+            "interactive = [true, false, true, 'false']\nuser = ['0:0', 42, '42']\ncustom-option = [false, 1.5, 'x y', false, '1.5', 'x y']\n",
+            vec![
+                "--custom-option=false",
+                "--custom-option=1.5",
+                "--custom-option=x y",
+                "--interactive=true",
+                "--interactive=false",
+                "--user=0:0",
+                "--user=42",
+            ],
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        write_config(directory.path());
+        let path = directory.path().join("Zenvfile");
+        let source = fs::read_to_string(&path)
+            .unwrap()
+            .replace("[exec.options]\n", &format!("[exec.options]\n{settings}"))
+            .replace(
+                "env = [\"FROM_CONFIG=config\"]",
+                "env = \"FROM_CONFIG=config\"",
+            );
+        fs::write(path, source).unwrap();
+        let binaries = fake_docker(directory.path());
+        let log = directory.path().join("argv");
+        let mut cmd = command(directory.path());
+        with_fake_path(&mut cmd, binaries.path());
+        let output = cmd
+            .env("FAKE_LOG", &log)
+            .args(["exec", "true"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(37), "{}", stderr(&output));
+        let args = logged_args(&log);
+        let options: Vec<_> = args
+            .iter()
+            .filter(|arg| {
+                arg.starts_with(b"--custom-option=")
+                    || arg.starts_with(b"--interactive=")
+                    || arg.starts_with(b"--user=")
+            })
+            .cloned()
+            .collect();
+        assert_eq!(
+            options,
+            expected
+                .iter()
+                .map(|value| value.as_bytes().to_vec())
+                .collect::<Vec<_>>()
+        );
+        assert!(args.contains(&b"--env=FROM_CONFIG=config".to_vec()));
+        assert!(!args.iter().any(|arg| arg.as_slice() == b"--custom-option"
+            || arg.as_slice() == b"--interactive"
+            || arg.as_slice() == b"--user"));
+    }
+}
+
+#[test]
+fn alias_options_replace_inherited_value_lists() {
+    let directory = tempfile::tempdir().unwrap();
+    write_config(directory.path());
+    let path = directory.path().join("Zenvfile");
+    let source = fs::read_to_string(&path).unwrap().replace(
+        "[exec.options]\n",
+        "[exec.options]\ninteractive = [true, false]\nuser = ['0:0', 42]\n",
+    );
+    fs::write(
+        path,
+        format!(
+            "{source}\n[aliases.pick]\ncommand = ['printf', 'picked']\n\
+        [aliases.pick.exec.options]\ninteractive = false\nuser = ['alias']\n"
+        ),
+    )
+    .unwrap();
+    let binaries = fake_docker(directory.path());
+    let log = directory.path().join("argv");
+    let mut cmd = command(directory.path());
+    with_fake_path(&mut cmd, binaries.path());
+    let output = cmd
+        .env("FAKE_LOG", &log)
+        .args(["exec", "pick"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(37), "{}", stderr(&output));
+    let args = logged_args(&log);
+    let options: Vec<_> = args
+        .iter()
+        .filter(|arg| arg.starts_with(b"--interactive=") || arg.starts_with(b"--user="))
+        .cloned()
+        .collect();
+    assert_eq!(
+        options,
+        [b"--interactive=false".to_vec(), b"--user=alias".to_vec()]
+    );
+    assert!(args.ends_with(&[
+        b"existing-id".to_vec(),
+        b"printf".to_vec(),
+        b"picked".to_vec()
+    ]));
 }
 
 fn enable_fingerprint_check(directory: &Path) {

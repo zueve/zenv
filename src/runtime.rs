@@ -1,23 +1,11 @@
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
-use serde::Deserialize;
+use indexmap::IndexSet;
 
 use crate::Result;
 
-pub const CONFIG_HASH_LABEL: &str = "zenv.config-hash";
-pub const MANAGED_NETWORK_LABEL: &str = "zenv.managed-network";
-
-/// Backend-specific extension options, interpreted only by the runtime adapter.
-pub type Options = BTreeMap<String, OptionValue>;
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum OptionValue {
-    Flag(bool),
-    Text(String),
-    List(Vec<String>),
-    Integer(i64),
-}
+/// Unique backend flag values in first-seen order, already converted to strings.
+pub type Options = BTreeMap<String, IndexSet<String>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContainerState {

@@ -5,15 +5,16 @@ use std::{
 };
 
 use serde::Deserialize;
+use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::{
     Error, Result,
-    runtime::{ExecRequest, OptionValue, Options, RunRequest},
+    runtime::{ExecRequest, Options, RunRequest},
 };
 
 mod context;
 mod environment;
-mod fingerprint;
 mod init;
 mod loader;
 mod template;
@@ -76,7 +77,6 @@ impl Alias {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub fingerprint: String,
     pub main: MainConfig,
     pub run: RunConfig,
     pub exec: ExecOptions,
@@ -85,6 +85,32 @@ pub struct Config {
 }
 
 impl Config {
+    /// Hash resolved container creation settings without reading external state.
+    pub fn run_hash(&self) -> String {
+        let init_commands: Vec<_> = self
+            .run
+            .init_commands
+            .iter()
+            .map(|request| {
+                json!({
+                    "command": request.command.iter()
+                        .map(|value| value.as_encoded_bytes()).collect::<Vec<_>>(),
+                    "options": request.options,
+                    "env": request.env.iter()
+                        .map(|value| value.as_encoded_bytes()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let settings = json!({
+            "project_directory": self.directory.as_os_str().as_encoded_bytes(),
+            "image": self.main.image,
+            "command": self.run.command,
+            "options": self.run.options,
+            "init_commands": init_commands,
+        });
+        format!("{:x}", Sha256::digest(settings.to_string().as_bytes()))
+    }
+
     /// Public aliases in name order; names beginning with an underscore are internal.
     pub fn public_aliases(&self) -> impl Iterator<Item = (&str, &Alias)> {
         self.aliases
@@ -96,7 +122,7 @@ impl Config {
     /// Build a runtime request using only the resolved configuration.
     pub fn run_request(&self) -> RunRequest {
         RunRequest {
-            fingerprint: Some(self.fingerprint.clone()),
+            fingerprint: Some(self.run_hash()),
             name: self.main.name.clone(),
             image: self.main.image.clone(),
             command: self.run.command.iter().map(OsString::from).collect(),
@@ -137,8 +163,7 @@ impl Config {
             return Vec::new();
         }
         match self.run.options.get("network") {
-            Some(OptionValue::Text(name)) => vec![name.clone()],
-            Some(OptionValue::List(names)) => names.clone(),
+            Some(names) => names.iter().cloned().collect(),
             _ => Vec::new(),
         }
     }

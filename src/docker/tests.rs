@@ -1,8 +1,8 @@
 use super::*;
 use crate::runtime::{
-    CONFIG_HASH_LABEL, Container, ContainerRuntime, ContainerState, ExecRequest, OptionValue,
-    Options, RunRequest,
+    Container, ContainerRuntime, ContainerState, ExecRequest, Options, RunRequest,
 };
+use indexmap::IndexSet;
 use std::{
     collections::BTreeMap,
     fs,
@@ -50,7 +50,7 @@ impl FakeDocker {
             name: "zenv-project".into(),
             image: "example:latest".into(),
             command: vec!["sleep".into(), "365d".into()],
-            options: BTreeMap::from([("detach".into(), OptionValue::Flag(true))]),
+            options: BTreeMap::from([("detach".into(), IndexSet::from(["true".into()]))]),
             directory: self.directory.path().to_path_buf(),
             fingerprint: None,
         }
@@ -125,7 +125,7 @@ fn malformed_responses_are_errors() {
 }
 
 #[test]
-fn exec_preserves_arguments_environment_and_option_types() {
+fn exec_preserves_arguments_environment_and_option_values() {
     let fake = FakeDocker::new("exit 17");
     let command = vec![
         OsString::from("printf"),
@@ -136,34 +136,29 @@ fn exec_preserves_arguments_environment_and_option_types() {
         command: command.clone(),
         env: vec!["A=hello\nworld".into(), "B=x=y".into()],
         options: BTreeMap::from([
-            ("interactive".into(), OptionValue::Flag(true)),
-            ("tty".into(), OptionValue::Flag(false)),
-            ("privileged".into(), OptionValue::Flag(true)),
-            ("workdir".into(), OptionValue::Text("/a b".into())),
-            ("user".into(), OptionValue::Integer(42)),
+            ("interactive".into(), IndexSet::from(["true".into()])),
+            ("tty".into(), IndexSet::from(["false".into()])),
+            ("privileged".into(), IndexSet::from(["true".into()])),
+            ("workdir".into(), IndexSet::from(["/a b".into()])),
+            ("user".into(), IndexSet::from(["42".into()])),
             (
                 "env-file".into(),
-                OptionValue::List(vec!["first".into(), "second".into()]),
+                IndexSet::from(["first".into(), "second".into()]),
             ),
         ]),
     };
     assert_eq!(fake.adapter.exec("container-id", &request).unwrap(), 17);
     let mut expected = strings(&[
         "exec",
-        "--env-file",
-        "first",
-        "--env-file",
-        "second",
-        "--interactive",
-        "--privileged",
-        "--user",
-        "42",
-        "--workdir",
-        "/a b",
-        "--env",
-        "A=hello\nworld",
-        "--env",
-        "B=x=y",
+        "--env-file=first",
+        "--env-file=second",
+        "--interactive=true",
+        "--privileged=true",
+        "--tty=false",
+        "--user=42",
+        "--workdir=/a b",
+        "--env=A=hello\nworld",
+        "--env=B=x=y",
         "--",
         "container-id",
     ]);
@@ -180,11 +175,7 @@ fn exec_does_not_inherit_host_values_for_unset_entries() {
         env: strings(&["HOME"]),
     };
     assert_eq!(fake.adapter.exec("container-id", &request).unwrap(), 0);
-    assert!(
-        fake.args()
-            .windows(2)
-            .any(|args| args == strings(&["--env", "HOME"]))
-    );
+    assert!(fake.args().contains(&OsString::from("--env=HOME")));
 }
 
 #[test]
@@ -194,23 +185,72 @@ fn strings_that_look_like_booleans_are_literal_values() {
         command: vec!["true".into()],
         env: vec![],
         options: BTreeMap::from([
-            ("workdir".into(), OptionValue::Text("true".into())),
-            ("user".into(), OptionValue::Text("false".into())),
+            ("workdir".into(), IndexSet::from(["true".into()])),
+            ("user".into(), IndexSet::from(["false".into()])),
         ]),
+    };
+    assert_eq!(fake.adapter.exec("id", &request).unwrap(), 0);
+    assert_eq!(
+        fake.args(),
+        strings(&["exec", "--user=false", "--workdir=true", "--", "id", "true"])
+    );
+}
+
+#[test]
+fn unique_values_are_emitted_in_first_seen_order_and_false_is_explicit() {
+    let fake = FakeDocker::new("exit 0");
+    let request = ExecRequest {
+        command: strings(&["work"]),
+        options: BTreeMap::from([
+            (
+                "interactive".into(),
+                IndexSet::from(["true".into(), "false".into(), "true".into()]),
+            ),
+            (
+                "mixed".into(),
+                IndexSet::from([
+                    "false".into(),
+                    "false".into(),
+                    "7".into(),
+                    "1.5".into(),
+                    "a b".into(),
+                    "false".into(),
+                ]),
+            ),
+            ("empty".into(), IndexSet::new()),
+        ]),
+        env: vec![],
     };
     assert_eq!(fake.adapter.exec("id", &request).unwrap(), 0);
     assert_eq!(
         fake.args(),
         strings(&[
             "exec",
-            "--user",
-            "false",
-            "--workdir",
-            "true",
+            "--interactive=true",
+            "--interactive=false",
+            "--mixed=false",
+            "--mixed=7",
+            "--mixed=1.5",
+            "--mixed=a b",
             "--",
             "id",
-            "true"
+            "work",
         ])
+    );
+}
+
+#[test]
+fn exec_preserves_non_utf8_environment_values() {
+    let fake = FakeDocker::new("exit 0");
+    let request = ExecRequest {
+        command: strings(&["work"]),
+        options: Options::new(),
+        env: vec![OsString::from_vec(b"KEY=\xff".to_vec())],
+    };
+    assert_eq!(fake.adapter.exec("id", &request).unwrap(), 0);
+    assert!(
+        fake.args()
+            .contains(&OsString::from_vec(b"--env=KEY=\xff".to_vec()))
     );
 }
 
@@ -265,7 +305,7 @@ fn run_uses_private_cidfile_and_request_directory() {
     assert!(!std::path::Path::new(&args[4]).exists());
     assert_eq!(
         &args[5..],
-        strings(&["--detach", "--", "example:latest", "sleep", "365d"])
+        strings(&["--detach=true", "--", "example:latest", "sleep", "365d"])
     );
     let cwd = fs::read_to_string(fake.directory.path().join("cwd")).unwrap();
     assert_eq!(
@@ -312,10 +352,30 @@ fn managed_and_invalid_options_are_rejected_before_launch() {
         let mut request = fake.request();
         request
             .options
-            .insert(name.into(), OptionValue::Text(value.into()));
+            .insert(name.into(), IndexSet::from([value.into()]));
         assert!(fake.adapter.validate_run(&request).is_err());
         assert!(fake.adapter.run(&request).is_err());
     }
+    assert!(!fake.directory.path().join("args").exists());
+}
+
+#[test]
+fn name_option_accepts_empty_or_matching_values() {
+    let fake = FakeDocker::new("exit 0");
+    let mut request = fake.request();
+    for names in [
+        IndexSet::new(),
+        IndexSet::from([request.name.clone(), request.name.clone()]),
+    ] {
+        request.options.insert("name".into(), names);
+        fake.adapter.validate_run(&request).unwrap();
+    }
+    request
+        .options
+        .get_mut("name")
+        .unwrap()
+        .insert("other".into());
+    assert!(fake.adapter.validate_run(&request).is_err());
     assert!(!fake.directory.path().join("args").exists());
 }
 
@@ -336,7 +396,7 @@ fn invalid_exec_options_are_rejected_without_launching_docker() {
     let fake = FakeDocker::new("exit 0");
     let request = ExecRequest {
         command: strings(&["work"]),
-        options: BTreeMap::from([("bad flag".into(), OptionValue::Flag(true))]),
+        options: BTreeMap::from([("bad flag".into(), IndexSet::from(["true".into()]))]),
         env: vec![],
     };
     assert!(fake.adapter.validate_exec(&request).is_err());
@@ -346,8 +406,8 @@ fn invalid_exec_options_are_rejected_without_launching_docker() {
 #[test]
 fn run_preserves_user_labels_and_stores_the_fingerprint_last() {
     for labels in [
-        OptionValue::Text("team=tools".into()),
-        OptionValue::List(vec!["team=tools".into(), "zenv.config-hash=old".into()]),
+        IndexSet::from(["team=tools".into()]),
+        IndexSet::from(["team=tools".into(), "zenv.config-hash=old".into()]),
     ] {
         let fake = FakeDocker::new(&format!(
             "while [ $# -gt 0 ]; do if [ \"$1\" = --cidfile ]; then printf '%s' '{ID}' > \"$2\"; break; fi; shift; done"
@@ -357,19 +417,17 @@ fn run_preserves_user_labels_and_stores_the_fingerprint_last() {
         request.options.insert("label".into(), labels.clone());
         let container = fake.adapter.run(&request).unwrap();
         assert_eq!(container.fingerprint, request.fingerprint);
-        assert_eq!(request.options["label"], labels);
+        assert_eq!(request.options["label"].as_slice(), labels.as_slice());
         let args = fake.args();
         let saved: Vec<_> = args
-            .windows(2)
-            .filter(|pair| pair[0] == "--label")
-            .map(|pair| pair[1].clone())
+            .into_iter()
+            .filter(|arg| arg.as_encoded_bytes().starts_with(b"--label="))
             .collect();
-        let mut expected: Vec<OsString> = match labels {
-            OptionValue::Text(label) => vec![label.into()],
-            OptionValue::List(labels) => labels.into_iter().map(OsString::from).collect(),
-            _ => unreachable!(),
-        };
-        expected.push(format!("{CONFIG_HASH_LABEL}=declared-hash").into());
+        let mut expected: Vec<OsString> = labels
+            .iter()
+            .map(|label| OsString::from(format!("--label={label}")))
+            .collect();
+        expected.push(format!("--label={CONFIG_HASH_LABEL}=declared-hash").into());
         assert_eq!(saved, expected);
     }
 }

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Error, Result, runtime::OptionValue};
+use crate::{Error, Result};
 
 use super::{ExecOptions, HostContext, loader::absolute, toml::ExecSettings};
 
@@ -71,12 +71,7 @@ pub(super) fn compose(
     };
     let mut options = settings.options;
     if let Some(configured) = options.remove("env") {
-        let OptionValue::List(rows) = configured else {
-            return Err(Error::Config(
-                "exec.options.env must be an array of strings".into(),
-            ));
-        };
-        for row in rows {
+        for row in configured {
             let key = row.split_once('=').map_or(row.as_str(), |(key, _)| key);
             if key.is_empty() {
                 return Err(Error::Config(
@@ -115,6 +110,7 @@ pub(super) fn compose(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexSet;
     use std::os::unix::fs::symlink;
 
     #[test]
@@ -131,7 +127,7 @@ mod tests {
         let alias = ExecSettings {
             env_file: Some("alias.env".into()),
             env_excludes: Some(vec!["KEY".into()]),
-            options: BTreeMap::from([("env".into(), OptionValue::List(vec!["KEY=config".into()]))]),
+            options: BTreeMap::from([("env".into(), IndexSet::from(["KEY=config".into()]))]),
         };
         let mut reads = 0;
         let files = load_files_with([&base, &base, &alias], directory.path(), |path| {

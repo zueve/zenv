@@ -1,6 +1,6 @@
 use super::loader::find_file;
 use super::*;
-use crate::runtime::OptionValue;
+use indexmap::IndexSet;
 use std::os::unix::{ffi::OsStringExt, fs::PermissionsExt};
 use std::{
     ffi::OsString,
@@ -32,6 +32,10 @@ fn config(source: &str) -> (TempDir, HostContext, Config) {
     (directory, host, config)
 }
 
+fn option_values(options: &crate::runtime::Options, name: &str) -> Vec<String> {
+    options[name].iter().cloned().collect()
+}
+
 #[test]
 fn defaults_and_partial_builtin_overrides() {
     let (_directory, _host, config) = config(
@@ -51,8 +55,8 @@ publish = ["8000:8000"]
     );
     assert_eq!(config.run.init_commands.len(), 2);
     let request = config.exec_request(&["ls".into()]).unwrap();
-    assert_eq!(request.options["user"], OptionValue::Text("123:456".into()));
-    assert_eq!(request.options["tty"], OptionValue::Flag(false));
+    assert_eq!(option_values(&request.options, "user"), ["123:456"]);
+    assert_eq!(option_values(&request.options, "tty"), ["false"]);
     assert_eq!(config.run_request().command, ["sleep", "365d"]);
 }
 
@@ -71,12 +75,12 @@ command = ["true"]
 "#,
     );
     assert!(config.run.init_commands.is_empty());
-    assert_eq!(config.run.options["volume"], OptionValue::List(vec![]));
-    assert_eq!(config.run.options["detach"], OptionValue::Flag(true));
+    assert!(config.run.options["volume"].is_empty());
+    assert_eq!(option_values(&config.run.options, "detach"), ["true"]);
     assert_eq!(config.run_request().command, ["true"]);
     let request = config.exec_request(&["env".into()]).unwrap();
-    assert_eq!(request.options["user"], OptionValue::Text("42".into()));
-    assert_eq!(request.options["interactive"], OptionValue::Flag(true));
+    assert_eq!(option_values(&request.options, "user"), ["42"]);
+    assert_eq!(option_values(&request.options, "interactive"), ["true"]);
 }
 
 #[test]
@@ -97,7 +101,7 @@ user = "0:0"
         request.command,
         ["useradd", "-m", "-r", "-u", "123", "-g", "456", "zenv"]
     );
-    assert_eq!(request.options["user"], OptionValue::Text("0:0".into()));
+    assert_eq!(option_values(&request.options, "user"), ["0:0"]);
 }
 
 #[test]
@@ -120,7 +124,10 @@ fn tty_tracks_stdin_and_can_be_overridden() {
     for tty in [false, true] {
         host.tty = tty;
         let config = FileConfigLoader::new(&host).load(None).unwrap();
-        assert_eq!(config.exec.options["tty"], OptionValue::Flag(tty));
+        assert_eq!(
+            option_values(&config.exec.options, "tty"),
+            [tty.to_string()]
+        );
     }
     fs::write(
         directory.path().join("Zenvfile"),
@@ -128,24 +135,145 @@ fn tty_tracks_stdin_and_can_be_overridden() {
     )
     .unwrap();
     assert_eq!(
-        FileConfigLoader::new(&host)
-            .load(None)
-            .unwrap()
-            .exec
-            .options["tty"],
-        OptionValue::Flag(false)
+        option_values(
+            &FileConfigLoader::new(&host)
+                .load(None)
+                .unwrap()
+                .exec
+                .options,
+            "tty"
+        ),
+        ["false"]
     );
 }
 
 #[test]
-fn environment_options_require_an_array() {
-    let (_directory, host) = project("[exec.options]\nenv = 'KEY=value'");
-    let error = FileConfigLoader::new(&host).load(None).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("exec.options.env must be an array of strings")
+fn environment_options_accept_scalar_and_mixed_lists() {
+    for (value, expected) in [
+        ("'KEY=value'", vec!["KEY=value"]),
+        ("['KEY=value']", vec!["KEY=value"]),
+        ("[true, 42, 'KEY=value']", vec!["42", "KEY=value", "true"]),
+    ] {
+        let (_directory, host) = project(&format!("[exec.options]\nenv = {value}"));
+        let config = FileConfigLoader::new(&host).load(None).unwrap();
+        assert_eq!(config.exec.env, expected);
+    }
+}
+
+#[test]
+fn all_option_values_are_ordered_sets_of_strings_including_false_values() {
+    let (_directory, _host, config) = config(
+        r#"
+[run]
+init_commands = [["setup"]]
+[run.options]
+interactive = true
+cpus = 0.5
+user = 42
+publish = []
+[exec.options]
+interactive = [true, false, true]
+mixed = ["text", false, 2, 0.25]
+until = 2026-11-08T12:30:00Z
+[aliases.setup]
+command = ["setup"]
+[aliases.setup.exec.options]
+interactive = [false, true]
+mixed = [false, "override"]
+"#,
     );
+    assert_eq!(option_values(&config.run.options, "interactive"), ["true"]);
+    assert_eq!(option_values(&config.run.options, "cpus"), ["0.5"]);
+    assert_eq!(option_values(&config.run.options, "user"), ["42"]);
+    assert!(config.run.options["publish"].is_empty());
+    assert_eq!(
+        option_values(&config.exec.options, "interactive"),
+        ["true", "false"]
+    );
+    assert_eq!(
+        option_values(&config.exec.options, "mixed"),
+        ["text", "false", "2", "0.25"]
+    );
+    assert_eq!(
+        option_values(&config.exec.options, "until"),
+        ["2026-11-08T12:30:00Z"]
+    );
+    let alias = config.exec_request(&["setup".into()]).unwrap();
+    assert_eq!(
+        option_values(&alias.options, "interactive"),
+        ["false", "true"]
+    );
+    assert_eq!(
+        option_values(&alias.options, "mixed"),
+        ["false", "override"]
+    );
+    assert_eq!(
+        option_values(&config.run.init_commands[0].options, "interactive"),
+        option_values(&alias.options, "interactive")
+    );
+}
+
+#[test]
+fn duplicate_flag_values_are_removed_after_interpolation_in_first_seen_order() {
+    let (_directory, _host, config) = config(
+        r#"
+[run]
+init_commands = [["setup"]]
+[run.options]
+network = ["first", "second", "first"]
+value = [false, "false", 42, "42", 42.0, nan, nan, "NaN"]
+[exec.options]
+interactive = [true, false, true, "true", "false"]
+user = ["{uid}", 123, "123", "other", "other"]
+env = ["KEY=first", "KEY=last", "KEY=first"]
+[aliases.setup]
+command = ["setup"]
+[aliases.setup.exec.options]
+user = [42, "42", false, "false", 42]
+"#,
+    );
+    assert_eq!(
+        option_values(&config.run.options, "network"),
+        ["first", "second"]
+    );
+    assert_eq!(config.manage_network(), ["first", "second"]);
+    assert_eq!(
+        option_values(&config.run.options, "value"),
+        ["false", "42", "NaN"]
+    );
+    assert_eq!(
+        option_values(&config.exec.options, "interactive"),
+        ["true", "false"]
+    );
+    assert_eq!(
+        option_values(&config.exec.options, "user"),
+        ["123", "other"]
+    );
+    assert_eq!(config.exec.env, ["KEY=last"]);
+    let alias = &config.aliases["setup"].exec;
+    assert_eq!(option_values(&alias.options, "user"), ["42", "false"]);
+    assert_eq!(
+        option_values(&config.run.init_commands[0].options, "user"),
+        option_values(&alias.options, "user")
+    );
+}
+
+#[test]
+fn nested_option_values_are_rejected_in_each_options_table() {
+    for source in [
+        "[run.options]\ninteractive = [[true]]",
+        "[exec.options]\nuser = { nested = 'value' }",
+        "[aliases.work]\ncommand = ['echo']\n[aliases.work.exec.options]\nuser = [[42]]",
+    ] {
+        let (_directory, host) = project(source);
+        assert!(
+            FileConfigLoader::new(&host)
+                .load(None)
+                .unwrap_err()
+                .to_string()
+                .contains("values must be scalars")
+        );
+    }
 }
 
 fn account_tools() -> TempDir {
@@ -295,8 +423,8 @@ command = ["echo"]
         .exec_request(&["first".into(), "--extra".into()])
         .unwrap();
     assert_eq!(request.command, ["second", "--fixed", "--extra"]);
-    assert_eq!(request.options["user"], OptionValue::Text("42".into()));
-    assert_eq!(request.options["tty"], OptionValue::Flag(true));
+    assert_eq!(option_values(&request.options, "user"), ["42"]);
+    assert_eq!(option_values(&request.options, "tty"), ["true"]);
     assert_eq!(config.run.command, ["second", "--fixed", "--startup"]);
     assert_eq!(
         config.run_request().command,
@@ -305,7 +433,7 @@ command = ["echo"]
     let init = &config.run.init_commands[0];
     assert_eq!(init.command, ["second", "--fixed", "--setup"]);
     assert!(!init.options.contains_key("user"));
-    assert_eq!(init.options["tty"], OptionValue::Flag(true));
+    assert_eq!(option_values(&init.options, "tty"), ["true"]);
 }
 
 #[test]
@@ -444,8 +572,8 @@ fn invalid_environment_settings_fail_during_load_including_unused_aliases() {
             "missing.env",
         ),
         (
-            "[aliases.unused]\ncommand = ['echo']\n[aliases.unused.exec.options]\nenv = 'KEY=value'",
-            "exec.options.env must be an array of strings",
+            "[aliases.unused]\ncommand = ['echo']\n[aliases.unused.exec.options]\nenv = [['KEY=value']]",
+            "values must be scalars",
         ),
         (
             "[exec.options]\nenv = ['=invalid']",
@@ -511,6 +639,8 @@ user = "0:0"
     ]);
     let config = FileConfigLoader::new(&host).load(None).unwrap();
 
+    let run_hash = config.run_hash();
+
     fs::write(
         directory.path().join(DEFAULT_FILENAME),
         "invalid changed config",
@@ -531,7 +661,7 @@ user = "0:0"
         default.env,
         ["FROM_CONFIG=config", "FROM_FILE=base", "HOST=before"]
     );
-    assert_eq!(default.options["user"], OptionValue::Text("42".into()));
+    assert_eq!(option_values(&default.options, "user"), ["42"]);
     let alias = config
         .exec_request(&["special".into(), "tail".into()])
         .unwrap();
@@ -543,9 +673,10 @@ user = "0:0"
     let init = &config.run.init_commands[0];
     assert_eq!(init.command, ["setup", "--init"]);
     assert_eq!(init.env, ["FROM_FILE=init", "HIDDEN=secret", "HOST=before"]);
-    assert_eq!(init.options["user"], OptionValue::Text("0:0".into()));
+    assert_eq!(option_values(&init.options, "user"), ["0:0"]);
     assert!(!init.options.contains_key("interactive"));
     assert_eq!(config.run_request().command, ["sleep", "365d", "--run"]);
+    assert_eq!(config.run_hash(), run_hash);
 }
 
 #[test]
@@ -596,12 +727,15 @@ fn init_preserves_runtime_placeholders_and_does_not_overwrite() {
     assert!(config.exec.env.is_empty());
     host.tty = true;
     assert_eq!(
-        FileConfigLoader::new(&host)
-            .load(None)
-            .unwrap()
-            .exec
-            .options["tty"],
-        OptionValue::Flag(true)
+        option_values(
+            &FileConfigLoader::new(&host)
+                .load(None)
+                .unwrap()
+                .exec
+                .options,
+            "tty"
+        ),
+        ["true"]
     );
     assert!(
         FileConfigLoader::new(&host)
@@ -695,7 +829,7 @@ fn non_utf8_arguments_and_environment_are_preserved() {
 
 fn fingerprint_of(directory: &Path, source: &str, host: &HostContext) -> String {
     fs::write(directory.join(DEFAULT_FILENAME), source).unwrap();
-    FileConfigLoader::new(host).load(None).unwrap().fingerprint
+    FileConfigLoader::new(host).load(None).unwrap().run_hash()
 }
 
 #[test]
@@ -706,12 +840,12 @@ fn run_policies_default_to_true_and_do_not_change_fingerprint() {
     assert!(config.manage_network().is_empty());
     assert_eq!(
         config.run_request().fingerprint.as_deref(),
-        Some(config.fingerprint.as_str())
+        Some(config.run_hash().as_str())
     );
-    assert_eq!(config.fingerprint.len(), 64);
+    assert_eq!(config.run_hash().len(), 64);
     assert!(
         config
-            .fingerprint
+            .run_hash()
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit())
     );
@@ -719,7 +853,7 @@ fn run_policies_default_to_true_and_do_not_change_fingerprint() {
         let source = format!("[run]\n{flag} = false\n");
         assert_eq!(
             fingerprint_of(directory.path(), &source, &host),
-            config.fingerprint
+            config.run_hash()
         );
         let loaded = FileConfigLoader::new(&host).load(None).unwrap();
         assert_eq!(loaded.run.manage_network, flag != "manage_network");
@@ -745,10 +879,11 @@ fn configured_networks_preserve_explicit_names_without_filtering() {
         ("'project-dev'", vec!["project-dev"]),
         (
             "['project-dev', 'project-dev', 'bridge', 'name=dev,alias=app']",
-            vec!["project-dev", "project-dev", "bridge", "name=dev,alias=app"],
+            vec!["project-dev", "bridge", "name=dev,alias=app"],
         ),
         ("[]", vec![]),
-        ("true", vec![]),
+        ("true", vec!["true"]),
+        ("[true, 42, 'project']", vec!["true", "42", "project"]),
     ] {
         let (_directory, _host, mut config) = config(&format!("[run.options]\nnetwork = {value}"));
         assert_eq!(config.manage_network(), expected);
@@ -756,7 +891,7 @@ fn configured_networks_preserve_explicit_names_without_filtering() {
         config
             .run
             .options
-            .insert("network".into(), OptionValue::Text("changed".into()));
+            .insert("network".into(), IndexSet::from(["changed".into()]));
         assert_eq!(config.manage_network(), ["changed"]);
         config.run.manage_network = false;
         assert!(config.manage_network().is_empty());
@@ -849,13 +984,138 @@ version = 1
 "#;
     assert_eq!(
         fingerprint_of(directory.path(), source, &host),
-        config.fingerprint
+        config.run_hash()
     );
 }
 
 #[test]
-fn invocation_values_and_relative_config_paths_do_not_change_fingerprint() {
-    let (directory, mut host, config) = config(FINGERPRINT_SETUP);
+fn omitted_and_explicit_empty_init_exec_settings_have_the_same_fingerprint() {
+    let source = "[run]\ninit_commands = [['setup']]\n[aliases.setup]\ncommand = ['provision']\n";
+    let (directory, mut host) = project(source);
+    host.environment.insert("KEY".into(), "value".into());
+    let baseline = FileConfigLoader::new(&host).load(None).unwrap();
+    for suffix in [
+        "[aliases.setup.exec]\n",
+        "[aliases.setup.exec]\nenv_file = ''\n",
+        "[aliases.setup.exec]\nenv_excludes = []\n",
+        "[aliases.setup.exec]\nenv_excludes = ['ABSENT']\n",
+        "[aliases.setup.exec.options]\n",
+        "[aliases.setup.exec]\nenv_file = ''\nenv_excludes = []\noptions = {}\n",
+    ] {
+        fs::write(
+            directory.path().join(DEFAULT_FILENAME),
+            format!("{source}{suffix}"),
+        )
+        .unwrap();
+        let loaded = FileConfigLoader::new(&host).load(None).unwrap();
+        assert_eq!(loaded.run_hash(), baseline.run_hash(), "{suffix}");
+        let request = &loaded.run.init_commands[0];
+        assert_eq!(request.command, baseline.run.init_commands[0].command);
+        assert_eq!(request.env, baseline.run.init_commands[0].env);
+        assert!(request.options.is_empty());
+    }
+    for suffix in [
+        "[aliases.setup.exec]\nenv_excludes = ['KEY']\n",
+        "[aliases.setup.exec.options]\nuser = '42'\n",
+    ] {
+        assert_ne!(
+            fingerprint_of(directory.path(), &format!("{source}{suffix}"), &host),
+            baseline.run_hash(),
+            "{suffix}"
+        );
+    }
+}
+
+#[test]
+fn scalar_singleton_and_equivalent_flag_values_have_the_same_fingerprint() {
+    let (directory, host) = project("");
+    for (scalar, list, text) in [
+        ("true", "[true]", "['true']"),
+        ("false", "[false]", "['false']"),
+        ("42", "[42]", "['42']"),
+        ("0.5", "[0.5]", "['0.5']"),
+        ("nan", "[nan]", "['NaN']"),
+        ("inf", "[inf]", "['inf']"),
+    ] {
+        let source = |value| {
+            format!(
+                "[run]\ninit_commands = [['setup']]\n[run.options]\nvalue = {value}\n\
+             [aliases.setup]\ncommand = ['setup']\n[aliases.setup.exec.options]\nvalue = {value}"
+            )
+        };
+        let previous = fingerprint_of(directory.path(), &source(scalar), &host);
+        assert_eq!(
+            fingerprint_of(directory.path(), &source(list), &host),
+            previous
+        );
+        assert_eq!(
+            fingerprint_of(directory.path(), &source(text), &host),
+            previous
+        );
+        assert_eq!(
+            fingerprint_of(
+                directory.path(),
+                &source(&format!("[{scalar}, {scalar}]")),
+                &host,
+            ),
+            previous
+        );
+    }
+    let source = |value| {
+        format!(
+            "[run]\ninit_commands = [['setup']]\n[run.options]\nvalue = {value}\n\
+         [aliases.setup]\ncommand = ['setup']\n[aliases.setup.exec.options]\nvalue = {value}"
+        )
+    };
+    assert_eq!(
+        fingerprint_of(directory.path(), &source("[true, false]"), &host),
+        fingerprint_of(
+            directory.path(),
+            &source("[true, false, true, 'false']"),
+            &host
+        )
+    );
+    assert_ne!(
+        fingerprint_of(
+            directory.path(),
+            "[run.options]\ninteractive = [true, false]",
+            &host
+        ),
+        fingerprint_of(
+            directory.path(),
+            "[run.options]\ninteractive = [false, true]",
+            &host
+        ),
+    );
+}
+
+#[test]
+fn resolved_invocation_values_change_the_run_hash_when_used_by_init() {
+    let (directory, host, config) = config(FINGERPRINT_SETUP);
+    let child = directory.path().join("nested");
+    fs::create_dir(&child).unwrap();
+    for change in ["cwd", "uid", "gid", "tty", "env"] {
+        let mut changed = host.clone();
+        match change {
+            "cwd" => changed.cwd = child.clone(),
+            "uid" => changed.uid = 987,
+            "gid" => changed.gid = 654,
+            "tty" => changed.tty = true,
+            "env" => {
+                changed.environment.insert("CHANGED".into(), "host".into());
+            }
+            _ => unreachable!(),
+        }
+        let loaded = FileConfigLoader::new(&changed).load(None).unwrap();
+        assert_ne!(loaded.run_hash(), config.run_hash(), "{change}");
+    }
+    let (_other_directory, _other_host, other) = self::config(FINGERPRINT_SETUP);
+    assert_ne!(other.run_hash(), config.run_hash());
+}
+
+#[test]
+fn host_changes_do_not_change_the_run_hash_without_affected_creation_settings() {
+    let (directory, mut host, baseline) = config("[run]\ninit_commands = []\n");
     let child = directory.path().join("nested");
     fs::create_dir(&child).unwrap();
     host.cwd = child;
@@ -863,19 +1123,76 @@ fn invocation_values_and_relative_config_paths_do_not_change_fingerprint() {
     host.gid = 654;
     host.tty = true;
     host.environment.insert("CHANGED".into(), "host".into());
-    let loader = FileConfigLoader::new(&host);
-    let nested = loader.load(None).unwrap();
-    assert_eq!(nested.fingerprint, config.fingerprint);
-    assert_ne!(nested.exec.options["user"], config.exec.options["user"]);
-    assert_eq!(
-        loader
-            .load(Some(Path::new("../Zenvfile")))
-            .unwrap()
-            .fingerprint,
-        config.fingerprint
+    let loaded = FileConfigLoader::new(&host).load(None).unwrap();
+    assert_eq!(loaded.run_hash(), baseline.run_hash());
+    assert_ne!(loaded.exec.env, baseline.exec.env);
+    assert_ne!(
+        option_values(&loaded.exec.options, "user"),
+        option_values(&baseline.exec.options, "user")
     );
-    let (_other_directory, _other_host, other) = self::config(FINGERPRINT_SETUP);
-    assert_ne!(other.fingerprint, config.fingerprint);
+}
+
+#[test]
+fn run_hash_reflects_current_creation_settings_and_ignores_execution_policy() {
+    let (_directory, _host, baseline) = config(FINGERPRINT_SETUP);
+    let previous = baseline.run_hash();
+    for change in [
+        "image",
+        "directory",
+        "command",
+        "options",
+        "init_command",
+        "init_options",
+        "init_env",
+    ] {
+        let mut changed = baseline.clone();
+        match change {
+            "image" => changed.main.image.push_str("-changed"),
+            "directory" => changed.directory.push("changed"),
+            "command" => changed.run.command.push("--changed".into()),
+            "options" => {
+                changed
+                    .run
+                    .options
+                    .insert("network".into(), IndexSet::from(["changed".into()]));
+            }
+            "init_command" => changed.run.init_commands[0]
+                .command
+                .push(OsString::from_vec(vec![0xff])),
+            "init_options" => {
+                changed.run.init_commands[0]
+                    .options
+                    .insert("user".into(), IndexSet::from(["42".into()]));
+            }
+            "init_env" => changed.run.init_commands[0]
+                .env
+                .push(OsString::from_vec(vec![b'K', b'=', 0xff])),
+            _ => unreachable!(),
+        }
+        assert_ne!(changed.run_hash(), previous, "{change}");
+        let first = changed.run_hash();
+        if change == "init_command" {
+            *changed.run.init_commands[0].command.last_mut().unwrap() =
+                OsString::from_vec(vec![0xfe]);
+            assert_ne!(changed.run_hash(), first);
+        }
+        if change == "init_env" {
+            *changed.run.init_commands[0].env.last_mut().unwrap() =
+                OsString::from_vec(vec![b'K', b'=', 0xfe]);
+            assert_ne!(changed.run_hash(), first);
+        }
+    }
+    let mut changed = baseline;
+    changed.main.name.push_str("-changed");
+    changed.main.debug = !changed.main.debug;
+    changed.run.manage_network = !changed.run.manage_network;
+    changed.run.check_zenvfile_changes = !changed.run.check_zenvfile_changes;
+    changed.exec.env.push("EXEC_ONLY=changed".into());
+    changed
+        .exec
+        .options
+        .insert("user".into(), IndexSet::from(["42".into()]));
+    assert_eq!(changed.run_hash(), previous);
 }
 
 #[test]
@@ -886,7 +1203,7 @@ fn active_and_escaped_init_placeholders_have_different_fingerprints() {
     let literal = active.replace("'{uid}'", "'{{uid}}'");
     assert_ne!(
         fingerprint_of(directory.path(), &literal, &host),
-        config.fingerprint
+        config.run_hash()
     );
     let loaded = FileConfigLoader::new(&host).load(None).unwrap();
     assert_eq!(loaded.run.init_commands[0].command, ["echo", "{uid}"]);
@@ -899,19 +1216,41 @@ fn equivalent_expanded_startup_commands_have_the_same_fingerprint() {
     let expanded = source.replace("['stay', '365d']", "['sleep', '365d']");
     assert_eq!(
         fingerprint_of(directory.path(), &expanded, &host),
-        config.fingerprint
+        config.run_hash()
     );
 }
 
 #[test]
-fn env_file_contents_do_not_change_the_fingerprint() {
+fn init_env_file_contents_change_the_run_hash() {
     let source = "[run]\ninit_commands = [['setup']]\n[exec]\nenv_file = '.env'\n[aliases.setup]\ncommand = ['setup-command']\n[aliases.setup.exec]\nenv_file = '.env'";
+    let (directory, host) = project(source);
+    let path = directory.path().join(".env");
+    fs::write(&path, "KEY=before\n").unwrap();
+    let before = FileConfigLoader::new(&host).load(None).unwrap();
+    fs::write(directory.path().join("same.env"), "KEY=before\n").unwrap();
+    fs::write(
+        directory.path().join(DEFAULT_FILENAME),
+        source.replace("env_file = '.env'", "env_file = 'same.env'"),
+    )
+    .unwrap();
+    let same = FileConfigLoader::new(&host).load(None).unwrap();
+    assert_eq!(before.run_hash(), same.run_hash());
+    fs::write(directory.path().join(DEFAULT_FILENAME), source).unwrap();
+    fs::write(path, "KEY=after\n").unwrap();
+    let after = FileConfigLoader::new(&host).load(None).unwrap();
+    assert_ne!(before.run_hash(), after.run_hash());
+    assert_ne!(before.exec.env, after.exec.env);
+}
+
+#[test]
+fn ordinary_exec_env_file_contents_do_not_change_the_run_hash() {
+    let source = "[run]\ninit_commands = []\n[exec]\nenv_file = '.env'\n";
     let (directory, host) = project(source);
     let path = directory.path().join(".env");
     fs::write(&path, "KEY=before\n").unwrap();
     let before = FileConfigLoader::new(&host).load(None).unwrap();
     fs::write(path, "KEY=after\n").unwrap();
     let after = FileConfigLoader::new(&host).load(None).unwrap();
-    assert_eq!(before.fingerprint, after.fingerprint);
+    assert_eq!(before.run_hash(), after.run_hash());
     assert_ne!(before.exec.env, after.exec.env);
 }

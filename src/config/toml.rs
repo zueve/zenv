@@ -56,9 +56,63 @@ pub(super) struct AliasSettings {
 }
 
 pub(super) fn parse(source: &str) -> Result<Value> {
-    source
+    let mut document = source
         .parse()
-        .map_err(|error| Error::Config(format!("invalid Zenvfile: {error}")))
+        .map_err(|error| Error::Config(format!("invalid Zenvfile: {error}")))?;
+    visit_options(&mut document, |options| {
+        for (name, value) in options {
+            let values = match std::mem::replace(value, Value::Array(Vec::new())) {
+                Value::Array(values) => values,
+                value => vec![value],
+            };
+            let mut normalized = Vec::with_capacity(values.len());
+            for value in values {
+                let text = match value {
+                    Value::String(value) => value,
+                    Value::Boolean(value) => value.to_string(),
+                    Value::Integer(value) => value.to_string(),
+                    Value::Float(value) => value.to_string(),
+                    Value::Datetime(value) => value.to_string(),
+                    Value::Array(_) | Value::Table(_) => {
+                        return Err(Error::Config(format!(
+                            "runtime option {name:?} values must be scalars"
+                        )));
+                    }
+                };
+                normalized.push(Value::String(text));
+            }
+            *value = Value::Array(normalized);
+        }
+        Ok(())
+    })?;
+    Ok(document)
+}
+
+fn visit_options(
+    document: &mut Value,
+    mut visit: impl FnMut(&mut ::toml::map::Map<String, Value>) -> Result<()>,
+) -> Result<()> {
+    for section in ["run", "exec"] {
+        if let Some(options) = document
+            .get_mut(section)
+            .and_then(|section| section.get_mut("options"))
+            .and_then(Value::as_table_mut)
+        {
+            visit(options)?;
+        }
+    }
+    if let Some(aliases) = document.get_mut("aliases").and_then(Value::as_table_mut) {
+        for (_, alias) in aliases.iter_mut() {
+            if let Some(options) = alias
+                .get_mut("exec")
+                .and_then(|exec| exec.get_mut("options"))
+                .and_then(Value::as_table_mut)
+            {
+                visit(options)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn serialize(document: &Value) -> Result<String> {

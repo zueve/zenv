@@ -136,21 +136,38 @@ the host snapshot; names absent from it are unset. Backend extension options
 such as `run.options.env` or Docker's `env-file` are passed through to the adapter
 and retain that backend's behavior.
 
-Docker options accept TOML booleans, strings, integers, or arrays of repeated
-string values. Strings are passed literally, including `"true"` and `"false"`.
-`exec.options.env` accepts only an array of strings. `run.options.cidfile` is
+Run and exec options accept TOML scalar values or arrays of scalars, including
+mixed strings, booleans and numbers. After variable substitution, the loader stores
+each option as an insertion-ordered set of strings (`IndexSet<String>`):
+`interactive = true` and `interactive = [true]` have the same meaning.
+Each element becomes a flag `--name=value`, in list order. For example,
+`interactive = [true, false]` produces `--interactive=true --interactive=false`.
+Duplicate flag values are removed during loading, preserving the first occurrence:
+`[true, false, true, "true"]` becomes `[true, false]`.
+An empty list emits no flags; false values are passed explicitly. Zenv does not
+infer allowed value types from option names; Docker interprets the flags.
+Scalars, equivalent singleton lists and lists differing only by duplicate values
+have the same creation fingerprint.
+This normalization changes fingerprints from earlier versions, so an existing
+container may request recreation after upgrading.
+
+`exec.options.env` follows the same scalar-or-list input rule; its values are
+merged with dotenv and host variables during loading. `run.options.cidfile` is
 reserved for ownership tracking. Set the container name in `main.name`;
 conflicting `run.options.name` values are rejected. Debug output reports Docker
 operations without printing command arguments or environment secrets.
 
 ## Configuration changes
 
-Zenv records a SHA-256 fingerprint of container creation settings in the Docker
-label `zenv.config-hash`. It covers the project directory, image, run options,
-startup command and initialization commands, including their alias execution
-settings. It tracks declarations: ordinary exec settings, host environment,
-UID/GID/TTY, invocation subdirectory, comments and unused aliases do not change
-it. Image tag contents and files referenced by commands are not fingerprinted.
+`Config::run_hash()` calculates a SHA-256 fingerprint from the resolved container
+creation settings. The Docker adapter stores it in `zenv.config-hash`. It covers
+the project directory, image, run options, startup command and initialization
+requests, including their resolved options and environment. Changes to host
+variables, UID/GID/TTY, invocation paths or dotenv values change the fingerprint
+when they affect these creation settings. Ordinary exec settings, policy flags,
+comments and unused aliases do not affect it. Image tag contents and files
+referenced by commands are not fingerprinted. Omitted init execution settings
+and explicitly empty defaults have the same fingerprint.
 
 When an existing container has a different fingerprint, or none, Zenv warns on
 stderr and asks whether to recreate it (default: no). Answer `y` to remove the

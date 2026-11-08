@@ -18,7 +18,7 @@ pub fn execute(
     let recreate = match &existing {
         Some(container)
             if config.run.check_zenvfile_changes
-                && container.fingerprint.as_deref() != Some(config.fingerprint.as_str()) =>
+                && container.fingerprint.as_deref() != Some(config.run_hash().as_str()) =>
         {
             confirm_recreation()?
         }

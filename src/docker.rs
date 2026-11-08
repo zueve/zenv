@@ -7,6 +7,9 @@ mod networks;
 mod options;
 mod process;
 
+const CONFIG_HASH_LABEL: &str = "zenv.config-hash";
+const MANAGED_NETWORK_LABEL: &str = "zenv.managed-network";
+
 #[derive(Clone, Debug)]
 pub struct DockerCli {
     program: OsString,

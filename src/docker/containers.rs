@@ -1,17 +1,14 @@
-use std::{collections::BTreeMap, process::Stdio};
+use std::{collections::BTreeMap, ffi::OsString, process::Stdio};
 
 use serde::Deserialize;
 
 use crate::{
     Error, Result,
-    runtime::{
-        CONFIG_HASH_LABEL, Container, ContainerRuntime, ContainerState, ExecRequest,
-        MANAGED_NETWORK_LABEL, OptionValue, RunRequest,
-    },
+    runtime::{Container, ContainerRuntime, ContainerState, ExecRequest, RunRequest},
 };
 
 use super::{
-    DockerCli,
+    CONFIG_HASH_LABEL, DockerCli, MANAGED_NETWORK_LABEL,
     options::{append_options, validate_name, validate_options},
     process::exit_code,
 };
@@ -60,8 +57,8 @@ impl ContainerRuntime for DockerCli {
                 "run.options.cidfile is reserved for container ownership tracking".into(),
             ));
         }
-        if let Some(name) = request.options.get("name") {
-            if name != &OptionValue::Text(request.name.clone()) {
+        if let Some(names) = request.options.get("name") {
+            if names.iter().any(|name| name != &request.name) {
                 return Err(Error::Config(
                     "run.options.name conflicts with main.name; set main.name instead".into(),
                 ));
@@ -115,9 +112,7 @@ impl ContainerRuntime for DockerCli {
         options.remove("name");
         append_options(&mut command, &options)?;
         if let Some(fingerprint) = &request.fingerprint {
-            command
-                .arg("--label")
-                .arg(format!("{CONFIG_HASH_LABEL}={fingerprint}"));
+            command.arg(format!("--label={CONFIG_HASH_LABEL}={fingerprint}"));
         }
         command
             .arg("--")
@@ -179,7 +174,9 @@ impl ContainerRuntime for DockerCli {
                 // An unset value in the snapshot must not inherit a later host value.
                 command.env_remove(variable);
             }
-            command.arg("--env").arg(variable);
+            let mut option = OsString::from("--env=");
+            option.push(variable);
+            command.arg(option);
         }
         command
             .arg("--")

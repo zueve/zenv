@@ -10,7 +10,7 @@ use std::{
 use crate::{Error, Result, runtime::ExecRequest};
 
 use super::{
-    Alias, Config, ConfigLoader, HostContext, RunConfig, environment, fingerprint, init, template,
+    Alias, Config, ConfigLoader, HostContext, RunConfig, environment, init, template,
     toml::{self, AliasSettings, Document},
 };
 
@@ -60,7 +60,10 @@ impl ConfigLoader for FileConfigLoader<'_> {
         defaults["exec"]["options"]
             .as_table_mut()
             .expect("builtin exec options are a table")
-            .insert("tty".into(), ::toml::Value::Boolean(host.tty));
+            .insert(
+                "tty".into(),
+                ::toml::Value::Array(vec![::toml::Value::String(host.tty.to_string())]),
+            );
         let mut default_parameters = parameters.clone();
         default_parameters.extend([
             ("image", DEFAULT_IMAGE.into()),
@@ -76,7 +79,6 @@ impl ConfigLoader for FileConfigLoader<'_> {
             .try_into()
             .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
         document.validate()?;
-        let fingerprint = fingerprint::config_hash(&source, directory)?;
 
         let env_files = environment::load_files(
             std::iter::once(&document.exec)
@@ -126,7 +128,6 @@ impl ConfigLoader for FileConfigLoader<'_> {
             .collect::<Result<_>>()?;
 
         Ok(Config {
-            fingerprint,
             main: document.main,
             run: RunConfig {
                 manage_network: document.run.manage_network,

@@ -1,9 +1,6 @@
 use std::process::Command;
 
-use crate::{
-    Error, Result,
-    runtime::{OptionValue, Options},
-};
+use crate::{Error, Result, runtime::Options};
 
 pub(super) fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() || name.starts_with('-') {
@@ -30,24 +27,9 @@ pub(super) fn validate_options(options: &Options) -> Result<()> {
 
 pub(super) fn append_options(command: &mut Command, options: &Options) -> Result<()> {
     validate_options(options)?;
-    for (name, value) in options {
-        let option = format!("--{name}");
-        match value {
-            OptionValue::Flag(true) => {
-                command.arg(option);
-            }
-            OptionValue::Flag(false) => {}
-            OptionValue::Text(value) => {
-                command.arg(option).arg(value);
-            }
-            OptionValue::Integer(value) => {
-                command.arg(option).arg(value.to_string());
-            }
-            OptionValue::List(values) => {
-                for value in values {
-                    command.arg(&option).arg(value);
-                }
-            }
+    for (name, values) in options {
+        for value in values {
+            command.arg(format!("--{name}={value}"));
         }
     }
     Ok(())

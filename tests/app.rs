@@ -6,11 +6,12 @@ use std::{
     ffi::OsString,
 };
 
+use indexmap::IndexSet;
 use tempfile::TempDir;
 use zenv::{
     Error, Result, app,
     config::{Alias, Config, ConfigLoader, FileConfigLoader, HostContext},
-    runtime::{Container, ContainerRuntime, ContainerState, ExecRequest, OptionValue, RunRequest},
+    runtime::{Container, ContainerRuntime, ContainerState, ExecRequest, RunRequest},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -461,7 +462,7 @@ fn matching_fingerprint_never_requests_confirmation() {
         ContainerState::Created,
     ] {
         let mut existing = container("existing", "zenv-test", state.clone());
-        existing.fingerprint = Some(config.fingerprint.clone());
+        existing.fingerprint = Some(config.run_hash());
         let runtime = FakeRuntime::new(Some(existing));
         assert_eq!(execute(&runtime, &config, &["work".into()]).unwrap(), 0);
         let mut expected = vec![Event::Inspect("zenv-test".into())];
@@ -529,7 +530,7 @@ fn approved_recreation_preserves_alias_arguments_exit_code_and_network_order() {
     config
         .run
         .options
-        .insert("network".into(), OptionValue::Text("project-dev".into()));
+        .insert("network".into(), IndexSet::from(["project-dev".into()]));
     config.aliases.insert(
         "work".into(),
         Alias {
@@ -620,7 +621,7 @@ fn invalid_replacement_requests_never_remove_existing_container_or_networks() {
     config
         .run
         .options
-        .insert("network".into(), OptionValue::Text("project-dev".into()));
+        .insert("network".into(), IndexSet::from(["project-dev".into()]));
     for invalid_init in [false, true] {
         let mut runtime = FakeRuntime::new(Some(container(
             "existing",
@@ -644,7 +645,7 @@ fn failed_removal_during_recreation_prevents_network_cleanup_and_creation() {
     config
         .run
         .options
-        .insert("network".into(), OptionValue::Text("project-dev".into()));
+        .insert("network".into(), IndexSet::from(["project-dev".into()]));
     let mut runtime = FakeRuntime::new(Some(container(
         "existing",
         "zenv-test",
@@ -666,7 +667,7 @@ fn configured_networks_are_created_before_container_and_removed_after_it() {
     let (_directory, mut config) = fixture();
     config.run.options.insert(
         "network".into(),
-        OptionValue::List(vec!["first".into(), "second".into()]),
+        IndexSet::from(["first".into(), "second".into()]),
     );
     let runtime = FakeRuntime::new(None);
     execute(&runtime, &config, &["work".into()]).unwrap();
@@ -701,7 +702,7 @@ fn networks_are_removed_even_when_container_is_absent() {
     config
         .run
         .options
-        .insert("network".into(), OptionValue::Text("project-dev".into()));
+        .insert("network".into(), IndexSet::from(["project-dev".into()]));
     let runtime = FakeRuntime::new(None);
     app::remove(&runtime, &config).unwrap();
     assert_eq!(
@@ -719,7 +720,7 @@ fn disabled_network_management_has_no_network_operations() {
     config
         .run
         .options
-        .insert("network".into(), OptionValue::Text("project-dev".into()));
+        .insert("network".into(), IndexSet::from(["project-dev".into()]));
     config.run.manage_network = false;
     let runtime = FakeRuntime::new(None);
     execute(&runtime, &config, &["work".into()]).unwrap();
@@ -744,7 +745,7 @@ fn creation_failure_does_not_roll_back_networks() {
     config
         .run
         .options
-        .insert("network".into(), OptionValue::Text("project-dev".into()));
+        .insert("network".into(), IndexSet::from(["project-dev".into()]));
     let mut runtime = FakeRuntime::new(None);
     runtime.fail_run = true;
     assert!(execute(&runtime, &config, &["work".into()]).is_err());
