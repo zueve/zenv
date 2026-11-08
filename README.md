@@ -124,6 +124,17 @@ Environment precedence, from highest to lowest, is host variables not listed in
 variables. `init` excludes the host variable names present when it runs.
 Dotenv paths are relative to the invocation directory; quoted multiline values
 are supported. Reading dotenv does not mutate the host process environment.
+All execution settings, including environments for aliases and initialization,
+are resolved when the configuration is loaded. Each distinct dotenv file is
+read and parsed once per load, including when aliases share it or refer to it
+through a symlink. Its values are merged with configured and host variables into
+the final `ExecOptions` stored in the configuration. Missing or invalid dotenv
+files and environment settings fail loading, including those of unused aliases.
+The loaded configuration is a snapshot: later file or host environment changes
+take effect on the next load. Bare names in `exec.options.env` are resolved from
+the host snapshot; names absent from it are unset. Backend extension options
+such as `run.options.env` or Docker's `env-file` are passed through to the adapter
+and retain that backend's behavior.
 
 Docker options accept TOML booleans, strings, integers, or arrays of repeated
 string values. Strings are passed literally, including `"true"` and `"false"`.
@@ -146,6 +157,20 @@ The explicitly enabled `docker_live` tests need a working Docker CLI and daemon;
 they create uniquely named containers and clean up only their own resources.
 
 The library separates configuration, application logic and runtime adapters.
+Configuration types live in `src/config.rs`. Its submodules in `src/config/`
+handle loading and validation (`loader`), variable substitution (`template`),
+TOML parsing and merging (`toml`), host context (`context`), environment file
+reading and composition (`environment`) and configuration creation (`init`).
+The loader returns a fully resolved `Config`, including initialization requests
+and environments for normal commands and aliases. `Config::run_request` and
+`Config::exec_request` build runtime requests solely from these loaded values;
+application execution needs no host context or file access. Environment
+precedence is host over Zenvfile over `.env`; exclusions apply to host variables.
+
+`ConfigLoader` defines both `init` and `load`. The CLI receives this interface;
+`FileConfigLoader` implements it for Zenvfile and dotenv files using a captured
+`HostContext`. Other loaders return the same concrete `Config` structure.
+
 Implement `zenv::runtime::ContainerRuntime` and inject it into `zenv::app` to use
 another backend. Docker command syntax and response parsing live in
 `zenv::docker::DockerCli`. Extension options are interpreted by the adapter;

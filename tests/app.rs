@@ -9,7 +9,7 @@ use std::{
 use tempfile::TempDir;
 use zenv::{
     Error, Result, app,
-    config::{Config, HostContext},
+    config::{Config, ConfigLoader, FileConfigLoader, HostContext},
     runtime::{Container, ContainerRuntime, ContainerState, ExecRequest, RunRequest},
 };
 
@@ -122,7 +122,7 @@ fn container(id: &str, name: &str, state: ContainerState) -> Container {
     }
 }
 
-fn fixture() -> (TempDir, Config, HostContext) {
+fn fixture() -> (TempDir, Config) {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(
         directory.path().join("Zenvfile"),
@@ -143,8 +143,8 @@ init_commands = [["init-one"], ["init-two"]]
         tty: false,
         environment: BTreeMap::new(),
     };
-    let config = Config::load(None, &host).unwrap();
-    (directory, config, host)
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
+    (directory, config)
 }
 
 fn exec(id: &str, command: &[&str]) -> Event {
@@ -153,14 +153,14 @@ fn exec(id: &str, command: &[&str]) -> Event {
 
 #[test]
 fn creates_initializes_and_executes_in_order() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let runtime = FakeRuntime::new(None);
     runtime
         .exec_results
         .borrow_mut()
         .extend([Ok(0), Ok(0), Ok(37)]);
     assert_eq!(
-        app::execute(&runtime, &config, &["work".into(), "a b".into()], &host).unwrap(),
+        app::execute(&runtime, &config, &["work".into(), "a b".into()]).unwrap(),
         37
     );
     assert_eq!(
@@ -177,13 +177,13 @@ fn creates_initializes_and_executes_in_order() {
 
 #[test]
 fn running_container_does_not_repeat_initialization() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let runtime = FakeRuntime::new(Some(container(
         "existing",
         "zenv-test",
         ContainerState::Running,
     )));
-    app::execute(&runtime, &config, &["work".into()], &host).unwrap();
+    app::execute(&runtime, &config, &["work".into()]).unwrap();
     assert_eq!(
         *runtime.events.borrow(),
         [
@@ -195,10 +195,10 @@ fn running_container_does_not_repeat_initialization() {
 
 #[test]
 fn starts_exited_and_created_containers_without_initializing_again() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     for state in [ContainerState::Exited, ContainerState::Created] {
         let runtime = FakeRuntime::new(Some(container("existing", "zenv-test", state)));
-        app::execute(&runtime, &config, &["work".into()], &host).unwrap();
+        app::execute(&runtime, &config, &["work".into()]).unwrap();
         assert_eq!(
             *runtime.events.borrow(),
             [
@@ -212,7 +212,7 @@ fn starts_exited_and_created_containers_without_initializing_again() {
 
 #[test]
 fn start_failure_prevents_execution() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let mut runtime = FakeRuntime::new(Some(container(
         "existing",
         "zenv-test",
@@ -220,7 +220,7 @@ fn start_failure_prevents_execution() {
     )));
     runtime.fail_start = true;
     assert!(
-        app::execute(&runtime, &config, &["work".into()], &host)
+        app::execute(&runtime, &config, &["work".into()])
             .unwrap_err()
             .to_string()
             .contains("start failed")
@@ -236,7 +236,7 @@ fn start_failure_prevents_execution() {
 
 #[test]
 fn unavailable_states_prevent_execution() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     for state in [
         ContainerState::Paused,
         ContainerState::Restarting,
@@ -244,7 +244,7 @@ fn unavailable_states_prevent_execution() {
         ContainerState::Unknown("future".into()),
     ] {
         let runtime = FakeRuntime::new(Some(container("existing", "zenv-test", state)));
-        assert!(app::execute(&runtime, &config, &["work".into()], &host).is_err());
+        assert!(app::execute(&runtime, &config, &["work".into()]).is_err());
         assert_eq!(
             *runtime.events.borrow(),
             [Event::Inspect("zenv-test".into())]
@@ -254,11 +254,11 @@ fn unavailable_states_prevent_execution() {
 
 #[test]
 fn failed_initialization_removes_only_the_new_container() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     for failure in [Ok(12), Err(Error::runtime("exec", "cannot execute init"))] {
         let runtime = FakeRuntime::new(None);
         runtime.exec_results.borrow_mut().push_back(failure);
-        assert!(app::execute(&runtime, &config, &["work".into()], &host).is_err());
+        assert!(app::execute(&runtime, &config, &["work".into()]).is_err());
         assert_eq!(
             *runtime.events.borrow(),
             [
@@ -273,11 +273,11 @@ fn failed_initialization_removes_only_the_new_container() {
 
 #[test]
 fn reports_initialization_and_cleanup_failures_together() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let mut runtime = FakeRuntime::new(None);
     runtime.fail_remove = true;
     runtime.exec_results.borrow_mut().push_back(Ok(12));
-    let error = app::execute(&runtime, &config, &["work".into()], &host)
+    let error = app::execute(&runtime, &config, &["work".into()])
         .unwrap_err()
         .to_string();
     assert!(error.contains("12"), "{error}");
@@ -286,10 +286,10 @@ fn reports_initialization_and_cleanup_failures_together() {
 
 #[test]
 fn inspect_failure_does_not_create_a_container() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let runtime = FakeRuntime::new(None);
     *runtime.inspected.borrow_mut() = Some(Err(Error::runtime("inspect", "daemon unavailable")));
-    assert!(app::execute(&runtime, &config, &["work".into()], &host).is_err());
+    assert!(app::execute(&runtime, &config, &["work".into()]).is_err());
     assert_eq!(
         *runtime.events.borrow(),
         [Event::Inspect("zenv-test".into())]
@@ -298,10 +298,10 @@ fn inspect_failure_does_not_create_a_container() {
 
 #[test]
 fn creation_failure_prevents_init_and_user_command() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let mut runtime = FakeRuntime::new(None);
     runtime.fail_run = true;
-    assert!(app::execute(&runtime, &config, &["work".into()], &host).is_err());
+    assert!(app::execute(&runtime, &config, &["work".into()]).is_err());
     assert_eq!(
         *runtime.events.borrow(),
         [
@@ -313,14 +313,14 @@ fn creation_failure_prevents_init_and_user_command() {
 
 #[test]
 fn user_command_failure_does_not_remove_the_container() {
-    let (_directory, config, host) = fixture();
+    let (_directory, config) = fixture();
     let runtime = FakeRuntime::new(None);
     runtime
         .exec_results
         .borrow_mut()
         .extend([Ok(0), Ok(0), Ok(9)]);
     assert_eq!(
-        app::execute(&runtime, &config, &["work".into()], &host).unwrap(),
+        app::execute(&runtime, &config, &["work".into()]).unwrap(),
         9
     );
     assert!(

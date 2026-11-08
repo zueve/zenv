@@ -2,7 +2,7 @@ use std::ffi::OsString;
 
 use crate::{
     Error, Result,
-    config::{Config, HostContext},
+    config::Config,
     runtime::{ContainerRuntime, ContainerState},
 };
 
@@ -10,24 +10,13 @@ pub fn execute(
     runtime: &(impl ContainerRuntime + ?Sized),
     config: &Config,
     command: &[OsString],
-    host: &HostContext,
 ) -> Result<i32> {
-    let request = config.prepare_exec(command, host, true)?;
+    let request = config.exec_request(command)?;
     let container = match runtime.inspect(&config.main.name)? {
         None => {
-            // Validate every init command before creating anything.
-            let init = config
-                .run
-                .init_commands
-                .iter()
-                .map(|command| {
-                    let command: Vec<_> = command.iter().map(OsString::from).collect();
-                    config.prepare_exec(&command, host, false)
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let container = runtime.run(&config.prepare_run()?)?;
-            for command in init {
-                let result = runtime.exec(&container.id, &command).and_then(|code| {
+            let container = runtime.run(&config.run_request())?;
+            for command in &config.run.init_commands {
+                let result = runtime.exec(&container.id, command).and_then(|code| {
                     if code == 0 {
                         Ok(())
                     } else {

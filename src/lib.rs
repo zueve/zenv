@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
-mod command;
 pub mod config;
 pub mod docker;
 pub mod error;

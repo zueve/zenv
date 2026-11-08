@@ -16,7 +16,7 @@ use std::{
 
 use zenv::{
     Result, app,
-    config::{Config, HostContext},
+    config::{Config, ConfigLoader, FileConfigLoader, HostContext},
     docker::DockerCli,
     runtime::{Container, ContainerRuntime, ContainerState, ExecRequest, RunRequest},
 };
@@ -25,7 +25,9 @@ struct Sandbox {
     directory: tempfile::TempDir,
     runtime: DockerCli,
     ids: RefCell<Vec<String>>,
-    host: HostContext,
+    uid: u32,
+    gid: u32,
+    cwd: PathBuf,
     config: Config,
 }
 
@@ -57,19 +59,21 @@ impl Sandbox {
         }
         source.push_str("[exec]\nenv_excludes = ['PATH', 'HOME', 'USER', 'SHELL']\n");
         fs::write(directory.path().join("Zenvfile"), source).unwrap();
-        let config = Config::load(None, &host).unwrap();
+        let config = FileConfigLoader::new(&host).load(None).unwrap();
         Self {
             directory,
             runtime: DockerCli::new(false),
             ids: RefCell::new(vec![]),
-            host,
+            uid: host.uid,
+            gid: host.gid,
+            cwd: host.cwd,
             config,
         }
     }
 
     fn execute(&self, args: &[&str]) -> i32 {
         let args = args.iter().map(OsString::from).collect::<Vec<_>>();
-        app::execute(self, &self.config, &args, &self.host).unwrap()
+        app::execute(self, &self.config, &args).unwrap()
     }
 }
 
@@ -111,17 +115,17 @@ impl Drop for Sandbox {
 #[ignore = "requires Docker CLI and daemon"]
 fn lifecycle_identity_workdir_environment_and_streams() {
     let sandbox = Sandbox::new(false);
-    let uid = sandbox.host.uid.to_string();
-    let gid = sandbox.host.gid.to_string();
-    let cwd = sandbox.host.cwd.to_str().unwrap();
+    let uid = sandbox.uid.to_string();
+    let gid = sandbox.gid.to_string();
+    let cwd = sandbox.cwd.to_str().unwrap();
     assert_eq!(sandbox.execute(&[
         "sh", "-c",
         "test \"$(id -u)\" = \"$1\" && test \"$(id -g)\" = \"$2\" && test \"$PWD\" = \"$3\" && printf '%s' \"$ZENV_LIVE_VALUE\" > result",
         "check", &uid, &gid, cwd,
     ]), 0);
-    let result = sandbox.host.cwd.join("result");
+    let result = sandbox.cwd.join("result");
     assert_eq!(fs::read_to_string(&result).unwrap(), "one\ntwo");
-    assert_eq!(fs::metadata(&result).unwrap().uid(), sandbox.host.uid);
+    assert_eq!(fs::metadata(&result).unwrap().uid(), sandbox.uid);
     let container = sandbox.inspect(&sandbox.config.main.name).unwrap().unwrap();
     app::stop(&sandbox, &sandbox.config.main.name).unwrap();
     assert_eq!(
@@ -143,7 +147,7 @@ fn lifecycle_identity_workdir_environment_and_streams() {
     );
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_zenv"))
-        .current_dir(&sandbox.host.cwd)
+        .current_dir(&sandbox.cwd)
         .args(["exec", "sh", "-c", "cat; printf error >&2; exit 23"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -176,8 +180,7 @@ fn lifecycle_identity_workdir_environment_and_streams() {
 #[ignore = "requires Docker CLI and daemon"]
 fn initialization_failure_removes_created_container() {
     let sandbox = Sandbox::new(true);
-    let error =
-        app::execute(&sandbox, &sandbox.config, &["true".into()], &sandbox.host).unwrap_err();
+    let error = app::execute(&sandbox, &sandbox.config, &["true".into()]).unwrap_err();
     assert!(error.to_string().contains("17"));
     assert!(
         sandbox
@@ -223,16 +226,16 @@ fn tty_and_ctrl_c() {
         ]);
     }
     let mut child = command
-        .current_dir(&sandbox.host.cwd)
+        .current_dir(&sandbox.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
-    let ready = sandbox.host.cwd.join("ready");
+    let ready = sandbox.cwd.join("ready");
     wait_until(&mut child, || ready.exists());
     child.stdin.as_mut().unwrap().write_all(&[3]).unwrap();
-    let interrupted = sandbox.host.cwd.join("interrupted");
+    let interrupted = sandbox.cwd.join("interrupted");
     wait_until(&mut child, || interrupted.exists());
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {

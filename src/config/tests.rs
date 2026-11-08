@@ -1,6 +1,12 @@
+use super::loader::find_file;
 use super::*;
 use crate::runtime::OptionValue;
 use std::os::unix::{ffi::OsStringExt, fs::PermissionsExt};
+use std::{
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+};
 use tempfile::TempDir;
 
 fn host(path: &Path) -> HostContext {
@@ -13,17 +19,22 @@ fn host(path: &Path) -> HostContext {
     }
 }
 
-fn config(source: &str) -> (TempDir, HostContext, Config) {
+fn project(source: &str) -> (TempDir, HostContext) {
     let directory = tempfile::tempdir().unwrap();
     fs::write(directory.path().join(DEFAULT_FILENAME), source).unwrap();
     let host = host(directory.path());
-    let config = Config::load(None, &host).unwrap();
+    (directory, host)
+}
+
+fn config(source: &str) -> (TempDir, HostContext, Config) {
+    let (directory, host) = project(source);
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
     (directory, host, config)
 }
 
 #[test]
 fn defaults_and_partial_builtin_overrides() {
-    let (_directory, host, config) = config(
+    let (_directory, _host, config) = config(
         r#"
 [aliases.__sleep__]
 description = "Keep running"
@@ -39,15 +50,15 @@ publish = ["8000:8000"]
         Some("Keep running")
     );
     assert_eq!(config.run.init_commands.len(), 2);
-    let request = config.prepare_exec(&["ls".into()], &host, true).unwrap();
+    let request = config.exec_request(&["ls".into()]).unwrap();
     assert_eq!(request.options["user"], OptionValue::Text("123:456".into()));
     assert_eq!(request.options["tty"], OptionValue::Flag(false));
-    assert_eq!(config.prepare_run().unwrap().command, ["sleep", "365d"]);
+    assert_eq!(config.run_request().command, ["sleep", "365d"]);
 }
 
 #[test]
 fn empty_arrays_replace_defaults_and_omitted_fields_are_inherited() {
-    let (_directory, host, config) = config(
+    let (_directory, _host, config) = config(
         r#"
 [run]
 init_commands = []
@@ -62,15 +73,15 @@ command = ["true"]
     assert!(config.run.init_commands.is_empty());
     assert_eq!(config.run.options["volume"], OptionValue::List(vec![]));
     assert_eq!(config.run.options["detach"], OptionValue::Flag(true));
-    assert_eq!(config.prepare_run().unwrap().command, ["true"]);
-    let request = config.prepare_exec(&["env".into()], &host, true).unwrap();
+    assert_eq!(config.run_request().command, ["true"]);
+    let request = config.exec_request(&["env".into()]).unwrap();
     assert_eq!(request.options["user"], OptionValue::Text("42".into()));
     assert_eq!(request.options["interactive"], OptionValue::Flag(true));
 }
 
 #[test]
 fn explicit_builtin_alias_is_used_verbatim() {
-    let (_directory, host, config) = config(
+    let (_directory, _host, config) = config(
         r#"
 [aliases.__create_user__]
 command = ["useradd", "-m", "-r", "-u", "{uid}", "-g", "{gid}", "zenv"]
@@ -81,9 +92,7 @@ user = "0:0"
     );
     let alias = &config.aliases["__create_user__"];
     assert_eq!(alias.description.as_deref(), Some("Project user"));
-    let request = config
-        .prepare_exec(&["__create_user__".into()], &host, false)
-        .unwrap();
+    let request = &config.run.init_commands[1];
     assert_eq!(
         request.command,
         ["useradd", "-m", "-r", "-u", "123", "-g", "456", "zenv"]
@@ -110,7 +119,7 @@ fn tty_tracks_stdin_and_can_be_overridden() {
     let (directory, mut host, _) = config("");
     for tty in [false, true] {
         host.tty = tty;
-        let config = Config::load(None, &host).unwrap();
+        let config = FileConfigLoader::new(&host).load(None).unwrap();
         assert_eq!(config.exec.options["tty"], OptionValue::Flag(tty));
     }
     fs::write(
@@ -119,17 +128,19 @@ fn tty_tracks_stdin_and_can_be_overridden() {
     )
     .unwrap();
     assert_eq!(
-        Config::load(None, &host).unwrap().exec.options["tty"],
+        FileConfigLoader::new(&host)
+            .load(None)
+            .unwrap()
+            .exec
+            .options["tty"],
         OptionValue::Flag(false)
     );
 }
 
 #[test]
 fn environment_options_require_an_array() {
-    let (_directory, host, config) = config("[exec.options]\nenv = 'KEY=value'");
-    let error = config
-        .prepare_exec(&["env".into()], &host, true)
-        .unwrap_err();
+    let (_directory, host) = project("[exec.options]\nenv = 'KEY=value'");
+    let error = FileConfigLoader::new(&host).load(None).unwrap_err();
     assert!(
         error
             .to_string()
@@ -178,7 +189,9 @@ fn default_setup_reuses_root_and_existing_identities() {
     for (uid, gid) in [(0, 0), (1000, 1000)] {
         host.uid = uid;
         host.gid = gid;
-        let config = Config::load(Some(&directory.path().join("Zenvfile")), &host).unwrap();
+        let config = FileConfigLoader::new(&host)
+            .load(Some(&directory.path().join("Zenvfile")))
+            .unwrap();
         for alias in ["__create_group__", "__create_user__"] {
             assert_eq!(setup_output(&config, alias, tools.path(), "existing"), "");
         }
@@ -221,10 +234,14 @@ fn finds_ancestors_and_resolves_relative_explicit_paths() {
     fs::create_dir_all(&child).unwrap();
     host.cwd = child;
     assert_eq!(
-        Config::load(None, &host).unwrap().directory,
+        FileConfigLoader::new(&host).load(None).unwrap().directory,
         directory.path()
     );
-    assert!(Config::load(Some(Path::new("../../Zenvfile")), &host).is_ok());
+    assert!(
+        FileConfigLoader::new(&host)
+            .load(Some(Path::new("../../Zenvfile")))
+            .is_ok()
+    );
 }
 
 #[test]
@@ -249,7 +266,9 @@ fn invalid_toml_version_and_empty_commands_are_errors() {
         let directory = tempfile::tempdir().unwrap();
         fs::write(directory.path().join(DEFAULT_FILENAME), source).unwrap();
         assert!(
-            Config::load(None, &host(directory.path())).is_err(),
+            FileConfigLoader::new(&host(directory.path()))
+                .load(None)
+                .is_err(),
             "{source}"
         );
     }
@@ -257,8 +276,11 @@ fn invalid_toml_version_and_empty_commands_are_errors() {
 
 #[test]
 fn aliases_expand_once_append_arguments_and_override_settings() {
-    let (_directory, host, config) = config(
+    let (_directory, _host, config) = config(
         r#"
+[run]
+command = ["first", "--startup"]
+init_commands = [["first", "--setup"]]
 [exec.options]
 user = "42"
 [aliases.first]
@@ -270,20 +292,25 @@ command = ["echo"]
 "#,
     );
     let request = config
-        .prepare_exec(&["first".into(), "--extra".into()], &host, true)
+        .exec_request(&["first".into(), "--extra".into()])
         .unwrap();
     assert_eq!(request.command, ["second", "--fixed", "--extra"]);
     assert_eq!(request.options["user"], OptionValue::Text("42".into()));
     assert_eq!(request.options["tty"], OptionValue::Flag(true));
-    let init = config
-        .prepare_exec(&["first".into()], &host, false)
-        .unwrap();
+    assert_eq!(config.run.command, ["second", "--fixed", "--startup"]);
+    assert_eq!(
+        config.run_request().command,
+        ["second", "--fixed", "--startup"]
+    );
+    let init = &config.run.init_commands[0];
+    assert_eq!(init.command, ["second", "--fixed", "--setup"]);
     assert!(!init.options.contains_key("user"));
+    assert_eq!(init.options["tty"], OptionValue::Flag(true));
 }
 
 #[test]
 fn environment_priority_exclusions_and_multiline_dotenv() {
-    let (directory, mut host, config) = config(
+    let (directory, mut host) = project(
         r#"
 [exec]
 env_file = ".env"
@@ -301,7 +328,8 @@ env = ["KEY=config", "CONFIG=config", "EXCLUDED=config"]
         ("KEY".into(), "host".into()),
         ("EXCLUDED".into(), "host".into()),
     ]);
-    let request = config.prepare_exec(&["env".into()], &host, true).unwrap();
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
+    let request = config.exec_request(&["env".into()]).unwrap();
     assert_eq!(
         request.env,
         [
@@ -317,10 +345,10 @@ env = ["KEY=config", "CONFIG=config", "EXCLUDED=config"]
 
 #[test]
 fn alias_can_clear_env_file_and_replace_exclusions() {
-    let (_directory, mut host, config) = config(
+    let (directory, mut host) = project(
         r#"
 [exec]
-env_file = "missing.env"
+env_file = ".env"
 env_excludes = ["KEY"]
 [aliases.test]
 command = ["env"]
@@ -329,15 +357,202 @@ env_file = ""
 env_excludes = []
 "#,
     );
+    fs::write(directory.path().join(".env"), "DOTENV=dotenv\n").unwrap();
     host.environment.insert("KEY".into(), "value".into());
-    assert!(config.prepare_exec(&["env".into()], &host, true).is_err());
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
     assert_eq!(
-        config
-            .prepare_exec(&["test".into()], &host, true)
-            .unwrap()
-            .env,
+        config.exec_request(&["env".into()]).unwrap().env,
+        ["DOTENV=dotenv"]
+    );
+    assert_eq!(
+        config.exec_request(&["test".into()]).unwrap().env,
         ["KEY=value"]
     );
+}
+
+#[test]
+fn bare_environment_entries_are_resolved_from_the_host_snapshot() {
+    let (_directory, mut host) = project(
+        "[exec]\nenv_excludes = ['KEY', 'EMPTY', 'BINARY']\n\
+         [exec.options]\nenv = ['KEY', 'EMPTY', 'BINARY', 'MISSING']",
+    );
+    let binary = OsString::from_vec(vec![0xff]);
+    host.environment = BTreeMap::from([
+        ("KEY".into(), "before".into()),
+        ("EMPTY".into(), "".into()),
+        ("BINARY".into(), binary.clone()),
+    ]);
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
+    host.environment.insert("KEY".into(), "after".into());
+    host.environment.insert("MISSING".into(), "later".into());
+    let mut binary_row = OsString::from("BINARY=");
+    binary_row.push(binary);
+    assert_eq!(
+        config.exec_request(&["env".into()]).unwrap().env,
+        [
+            binary_row,
+            "EMPTY=".into(),
+            "KEY=before".into(),
+            "MISSING".into(),
+        ]
+    );
+}
+
+#[test]
+fn env_file_paths_use_invocation_directory_and_alias_overrides() {
+    let (directory, mut host) = project(
+        r#"
+[exec]
+env_file = ".env"
+[aliases.root]
+command = ["env"]
+[aliases.root.exec]
+env_file = "../.env"
+"#,
+    );
+    let child = directory.path().join("child");
+    fs::create_dir(&child).unwrap();
+    fs::write(directory.path().join(".env"), "KEY=root\n").unwrap();
+    fs::write(child.join(".env"), "KEY=child\n").unwrap();
+    host.cwd = child;
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
+    assert_eq!(
+        config.exec_request(&["env".into()]).unwrap().env,
+        ["KEY=child"]
+    );
+    assert_eq!(
+        config.exec_request(&["root".into()]).unwrap().env,
+        ["KEY=root"]
+    );
+}
+
+#[test]
+fn malformed_env_file_errors_include_its_path() {
+    let (directory, host) = project("[exec]\nenv_file = '.env'");
+    let path = directory.path().join(".env");
+    fs::write(&path, "KEY='unterminated").unwrap();
+    let error = FileConfigLoader::new(&host).load(None).unwrap_err();
+    assert!(error.to_string().contains(path.to_str().unwrap()));
+}
+
+#[test]
+fn invalid_environment_settings_fail_during_load_including_unused_aliases() {
+    for (source, expected) in [
+        ("[exec]\nenv_file = 'missing.env'", "missing.env"),
+        (
+            "[aliases.unused]\ncommand = ['echo']\n[aliases.unused.exec]\nenv_file = 'missing.env'",
+            "missing.env",
+        ),
+        (
+            "[aliases.unused]\ncommand = ['echo']\n[aliases.unused.exec.options]\nenv = 'KEY=value'",
+            "exec.options.env must be an array of strings",
+        ),
+        (
+            "[exec.options]\nenv = ['=invalid']",
+            "environment variable names must not be empty",
+        ),
+    ] {
+        let (_directory, host) = project(source);
+        let error = FileConfigLoader::new(&host).load(None).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn malformed_unused_alias_env_file_fails_during_load() {
+    let (directory, host) = project(
+        "[aliases.unused]\ncommand = ['echo']\n[aliases.unused.exec]\nenv_file = 'unused.env'",
+    );
+    let path = directory.path().join("unused.env");
+    fs::write(&path, "KEY='unterminated").unwrap();
+    let error = FileConfigLoader::new(&host).load(None).unwrap_err();
+    assert!(error.to_string().contains(path.to_str().unwrap()));
+}
+
+#[test]
+fn loaded_config_keeps_all_requests_after_host_and_input_files_change() {
+    let (directory, mut host) = project(
+        r#"
+[run]
+command = ["stay", "--run"]
+init_commands = [["bootstrap", "--init"]]
+[exec]
+env_file = "base.env"
+env_excludes = ["HIDDEN"]
+[exec.options]
+env = ["FROM_CONFIG=config"]
+user = "42"
+[aliases.stay]
+command = ["sleep", "365d"]
+[aliases.special]
+command = ["echo", "{uid}"]
+[aliases.special.exec]
+env_file = "alias.env"
+[aliases.special.exec.options]
+env = ["FROM_ALIAS=config"]
+[aliases.bootstrap]
+command = ["setup"]
+[aliases.bootstrap.exec]
+env_file = "init.env"
+[aliases.bootstrap.exec.options]
+user = "0:0"
+"#,
+    );
+    for (file, value) in [
+        ("base.env", "base"),
+        ("alias.env", "alias"),
+        ("init.env", "init"),
+    ] {
+        fs::write(directory.path().join(file), format!("FROM_FILE={value}\n")).unwrap();
+    }
+    host.environment = BTreeMap::from([
+        ("HOST".into(), "before".into()),
+        ("HIDDEN".into(), "secret".into()),
+    ]);
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
+
+    fs::write(
+        directory.path().join(DEFAULT_FILENAME),
+        "invalid changed config",
+    )
+    .unwrap();
+    for file in ["base.env", "alias.env", "init.env"] {
+        fs::write(directory.path().join(file), "FROM_FILE=changed\n").unwrap();
+        fs::remove_file(directory.path().join(file)).unwrap();
+    }
+    host.environment.clear();
+    host.environment.insert("HOST".into(), "after".into());
+    host.uid = 999;
+    drop(host);
+    drop(directory);
+
+    let default = config.exec_request(&["env".into()]).unwrap();
+    assert_eq!(
+        default.env,
+        ["FROM_CONFIG=config", "FROM_FILE=base", "HOST=before"]
+    );
+    assert_eq!(default.options["user"], OptionValue::Text("42".into()));
+    let alias = config
+        .exec_request(&["special".into(), "tail".into()])
+        .unwrap();
+    assert_eq!(alias.command, ["echo", "123", "tail"]);
+    assert_eq!(
+        alias.env,
+        ["FROM_ALIAS=config", "FROM_FILE=alias", "HOST=before"]
+    );
+    let init = &config.run.init_commands[0];
+    assert_eq!(init.command, ["setup", "--init"]);
+    assert_eq!(init.env, ["FROM_FILE=init", "HIDDEN=secret", "HOST=before"]);
+    assert_eq!(init.options["user"], OptionValue::Text("0:0".into()));
+    assert!(!init.options.contains_key("interactive"));
+    assert_eq!(config.run_request().command, ["sleep", "365d", "--run"]);
+}
+
+#[test]
+fn empty_exec_commands_are_rejected_without_host_context() {
+    let (_directory, _host, config) = config("");
+    assert!(config.exec_request(&[]).is_err());
+    assert!(config.exec_request(&["".into()]).is_err());
 }
 
 #[test]
@@ -352,7 +567,7 @@ fn interpolation_handles_quoted_paths_and_unknown_tokens() {
     )
     .unwrap();
     host.cwd = path.clone();
-    let config = Config::load(None, &host).unwrap();
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
     assert_eq!(
         config.aliases["show"].command,
         [path.to_str().unwrap(), "{unknown}", "{uid}", "123"]
@@ -365,19 +580,49 @@ fn init_preserves_runtime_placeholders_and_does_not_overwrite() {
     let mut host = host(directory.path());
     host.environment
         .insert("KEY\"quoted".into(), "value".into());
-    let path = init(&host, "python:3", None, Some("example")).unwrap();
+    let path = FileConfigLoader::new(&host)
+        .init("python:3", None, Some("example"))
+        .unwrap();
     let source = fs::read_to_string(&path).unwrap();
     assert!(source.contains("{zenvfilepath}"));
-    let config = Config::load(None, &host).unwrap();
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
     assert_eq!(config.main.name, "zenv-example");
     assert_eq!(config.main.image, "python:3");
-    assert_eq!(config.exec.env_excludes, Some(vec!["KEY\"quoted".into()]));
+    let document: ::toml::Value = source.parse().unwrap();
+    assert_eq!(
+        document["exec"]["env_excludes"][0].as_str(),
+        Some("KEY\"quoted")
+    );
+    assert!(config.exec.env.is_empty());
     host.tty = true;
     assert_eq!(
-        Config::load(None, &host).unwrap().exec.options["tty"],
+        FileConfigLoader::new(&host)
+            .load(None)
+            .unwrap()
+            .exec
+            .options["tty"],
         OptionValue::Flag(true)
     );
-    assert!(init(&host, DEFAULT_IMAGE, None, None).is_err());
+    assert!(
+        FileConfigLoader::new(&host)
+            .init(DEFAULT_IMAGE, None, None)
+            .is_err()
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), source);
+}
+
+#[test]
+fn loader_trait_initializes_and_loads_without_overwriting() {
+    let directory = tempfile::tempdir().unwrap();
+    let host = host(directory.path());
+    let file_loader = FileConfigLoader::new(&host);
+    let loader: &dyn ConfigLoader = &file_loader;
+    let path = loader.init("python:3", None, Some("trait-loader")).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    let config = loader.load(Some(&path)).unwrap();
+    assert_eq!(config.main.image, "python:3");
+    assert_eq!(config.main.name, "zenv-trait-loader");
+    assert!(loader.init(DEFAULT_IMAGE, None, None).is_err());
     assert_eq!(fs::read_to_string(path).unwrap(), source);
 }
 
@@ -391,17 +636,22 @@ fn custom_init_template_is_relative_and_escaped_safely() {
         "[main]\nimage = '{image}'\nname = '{container_name}'\n[exec]\nenv_excludes = []\n",
     )
     .unwrap();
-    init(
-        &host,
-        "image\"quoted",
-        Some(Path::new("template")),
-        Some("name'quoted"),
-    )
-    .unwrap();
-    let config = Config::load(None, &host).unwrap();
+    FileConfigLoader::new(&host)
+        .init(
+            "image\"quoted",
+            Some(Path::new("template")),
+            Some("name'quoted"),
+        )
+        .unwrap();
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
     assert_eq!(config.main.name, "name'quoted");
     assert_eq!(config.main.image, "image\"quoted");
-    assert_eq!(config.exec.env_excludes, Some(vec!["KEY".into()]));
+    let document: ::toml::Value = fs::read_to_string(directory.path().join(DEFAULT_FILENAME))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(document["exec"]["env_excludes"][0].as_str(), Some("KEY"));
+    assert!(config.exec.env.is_empty());
 }
 
 #[test]
@@ -411,23 +661,31 @@ fn init_requires_valid_toml_and_preserves_explicit_exclusions() {
     host.environment.insert("HOST".into(), "value".into());
     let template = directory.path().join("template");
     fs::write(&template, "[exec]\nenv_excludes = {env_excludes}").unwrap();
-    assert!(init(&host, DEFAULT_IMAGE, Some(&template), None).is_err());
+    assert!(
+        FileConfigLoader::new(&host)
+            .init(DEFAULT_IMAGE, Some(&template), None)
+            .is_err()
+    );
     assert!(!directory.path().join(DEFAULT_FILENAME).exists());
     fs::write(&template, "[exec]\nenv_excludes = ['KEEP']").unwrap();
-    init(&host, DEFAULT_IMAGE, Some(&template), None).unwrap();
+    host.environment.insert("KEEP".into(), "excluded".into());
+    FileConfigLoader::new(&host)
+        .init(DEFAULT_IMAGE, Some(&template), None)
+        .unwrap();
     assert_eq!(
-        Config::load(None, &host).unwrap().exec.env_excludes,
-        Some(vec!["KEEP".into()])
+        FileConfigLoader::new(&host).load(None).unwrap().exec.env,
+        ["HOST=value"]
     );
 }
 
 #[test]
 fn non_utf8_arguments_and_environment_are_preserved() {
-    let (_directory, mut host, config) = config("");
+    let (_directory, mut host) = project("");
     let bytes = OsString::from_vec(vec![0xff, b'a']);
     host.environment.insert("KEY".into(), bytes.clone());
+    let config = FileConfigLoader::new(&host).load(None).unwrap();
     let request = config
-        .prepare_exec(&["echo".into(), bytes.clone()], &host, true)
+        .exec_request(&["echo".into(), bytes.clone()])
         .unwrap();
     assert_eq!(request.command[1], bytes);
     let mut row = OsString::from("KEY=");

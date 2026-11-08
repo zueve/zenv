@@ -1,9 +1,20 @@
-use std::{fs::OpenOptions, io::Write};
+use std::{
+    collections::BTreeMap,
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+};
 
-use super::*;
+use crate::{Error, Result};
+
+use super::{
+    DEFAULT_FILENAME, DEFAULT_IMAGE, HostContext,
+    loader::{DEFAULTS, absolute, directory_name},
+    template, toml,
+};
 
 /// Initialize without overwriting an existing file, including in concurrent invocations.
-pub fn init(
+pub(super) fn init(
     host: &HostContext,
     image: &str,
     template: Option<&Path>,
@@ -25,17 +36,20 @@ pub fn init(
             })
         })
         .collect::<Result<_>>()?;
-    let excludes = toml::Value::Array(
+    let excludes = ::toml::Value::Array(
         excluded
             .into_iter()
-            .map(|key| toml::Value::String(key.into()))
+            .map(|key| ::toml::Value::String(key.into()))
             .collect(),
     );
-    let mut document = parse_config(&source)?;
-    if let Some(exec) = document.get_mut("exec").and_then(toml::Value::as_table_mut) {
+    let mut document = toml::parse(&source)?;
+    if let Some(exec) = document
+        .get_mut("exec")
+        .and_then(::toml::Value::as_table_mut)
+    {
         if exec
             .get("env_excludes")
-            .and_then(toml::Value::as_array)
+            .and_then(::toml::Value::as_array)
             .is_some_and(Vec::is_empty)
         {
             exec.insert("env_excludes".into(), excludes);
@@ -59,9 +73,8 @@ pub fn init(
                 .unwrap_or_else(|| directory_name(&host.cwd)),
         ),
     ]);
-    interpolate_value(&mut document, &parameters);
-    let content =
-        toml::to_string_pretty(&document).map_err(|error| Error::Config(error.to_string()))?;
+    template::interpolate_value(&mut document, &parameters);
+    let content = toml::serialize(&document)?;
     let path = host.cwd.join(DEFAULT_FILENAME);
     let mut file = OpenOptions::new()
         .write(true)

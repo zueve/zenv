@@ -197,6 +197,10 @@ impl ContainerRuntime for DockerCli {
         let mut command = self.command(["exec"]);
         append_options(&mut command, &request.options)?;
         for variable in &request.env {
+            if !variable.as_encoded_bytes().contains(&b'=') {
+                // An unset value in the snapshot must not inherit a later host value.
+                command.env_remove(variable);
+            }
             command.arg("--env").arg(variable);
         }
         command.arg("--").arg(id).args(&request.command);
@@ -465,6 +469,22 @@ mod tests {
         ]);
         expected.extend(command);
         assert_eq!(fake.args(), expected);
+    }
+
+    #[test]
+    fn exec_does_not_inherit_host_values_for_unset_entries() {
+        let fake = FakeDocker::new("test -z \"${HOME+x}\"");
+        let request = ExecRequest {
+            command: strings(&["env"]),
+            options: Options::new(),
+            env: strings(&["HOME"]),
+        };
+        assert_eq!(fake.adapter.exec("container-id", &request).unwrap(), 0);
+        assert!(
+            fake.args()
+                .windows(2)
+                .any(|args| args == strings(&["--env", "HOME"]))
+        );
     }
 
     #[test]

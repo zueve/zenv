@@ -10,7 +10,7 @@ use std::{
 use clap::{Args, Parser, Subcommand};
 use zenv::{
     Result, app,
-    config::{self, Config, HostContext},
+    config::{self, Config, ConfigLoader, FileConfigLoader, HostContext},
     docker::DockerCli,
     runtime::ContainerRuntime,
 };
@@ -68,7 +68,9 @@ enum Commands {
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let result = HostContext::capture().and_then(|host| run(cli, &FileConfigLoader::new(&host)));
+    match result {
         Ok(code) => ExitCode::from(code as u8),
         Err(error) => {
             eprintln!("Error: {error}");
@@ -77,28 +79,22 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> Result<i32> {
-    let host = HostContext::capture()?;
+fn run(cli: Cli, loader: &dyn ConfigLoader) -> Result<i32> {
     match cli.command {
         Commands::Init {
             image,
             template,
             container_name,
         } => {
-            config::init(
-                &host,
-                &image,
-                template.as_deref(),
-                container_name.as_deref(),
-            )?;
+            loader.init(&image, template.as_deref(), container_name.as_deref())?;
             println!("Zenvfile created");
         }
         Commands::Exec { config, command } => {
-            let config = Config::load(config.zenvfile.as_deref(), &host)?;
-            return app::execute(&DockerCli::new(config.main.debug), &config, &command, &host);
+            let config = loader.load(config.zenvfile.as_deref())?;
+            return app::execute(&DockerCli::new(config.main.debug), &config, &command);
         }
         Commands::Info(path) => {
-            let config = Config::load(path.zenvfile.as_deref(), &host)?;
+            let config = loader.load(path.zenvfile.as_deref())?;
             let runtime = DockerCli::new(config.main.debug);
             let container = runtime.inspect(&config.main.name)?;
             let mut output = io::stdout().lock();
@@ -110,11 +106,11 @@ fn run(cli: Cli) -> Result<i32> {
             }
         }
         Commands::Stop(path) => {
-            let config = Config::load(path.zenvfile.as_deref(), &host)?;
+            let config = loader.load(path.zenvfile.as_deref())?;
             app::stop(&DockerCli::new(config.main.debug), &config.main.name)?;
         }
         Commands::Rm(path) => {
-            let config = Config::load(path.zenvfile.as_deref(), &host)?;
+            let config = loader.load(path.zenvfile.as_deref())?;
             app::remove(&DockerCli::new(config.main.debug), &config.main.name)?;
         }
         Commands::StopAll {
@@ -122,7 +118,7 @@ fn run(cli: Cli) -> Result<i32> {
             exclude_current,
         } => {
             let config = if exclude_current {
-                Some(Config::load(config.zenvfile.as_deref(), &host)?)
+                Some(loader.load(config.zenvfile.as_deref())?)
             } else {
                 None
             };

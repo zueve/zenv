@@ -63,7 +63,7 @@ pub struct RunRequest {
 pub struct ExecRequest {
     pub command: Vec<OsString>,
     pub options: Options,
-    /// Environment entries in KEY=VALUE form (or KEY to inherit from the host).
+    /// Resolved environment entries in KEY=VALUE form (or KEY to unset it).
     pub env: Vec<OsString>,
 }
 
