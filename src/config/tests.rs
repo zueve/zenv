@@ -703,7 +703,7 @@ fn run_policies_default_to_true_and_do_not_change_fingerprint() {
     let (directory, host, config) = config("");
     assert!(config.run.manage_network);
     assert!(config.run.check_zenvfile_changes);
-    assert!(config.run.networks.is_empty());
+    assert!(config.manage_network().is_empty());
     assert_eq!(
         config.run_request().fingerprint.as_deref(),
         Some(config.fingerprint.as_str())
@@ -750,9 +750,16 @@ fn configured_networks_preserve_explicit_names_without_filtering() {
         ("[]", vec![]),
         ("true", vec![]),
     ] {
-        let (_directory, _host, config) = config(&format!("[run.options]\nnetwork = {value}"));
-        assert_eq!(config.run.networks, expected);
+        let (_directory, _host, mut config) = config(&format!("[run.options]\nnetwork = {value}"));
+        assert_eq!(config.manage_network(), expected);
         assert!(config.run.options.contains_key("network"));
+        config
+            .run
+            .options
+            .insert("network".into(), OptionValue::Text("changed".into()));
+        assert_eq!(config.manage_network(), ["changed"]);
+        config.run.manage_network = false;
+        assert!(config.manage_network().is_empty());
     }
 }
 

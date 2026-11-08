@@ -7,10 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    Error, Result,
-    runtime::{ExecRequest, OptionValue},
-};
+use crate::{Error, Result, runtime::ExecRequest};
 
 use super::{
     Alias, Config, ConfigLoader, HostContext, RunConfig, environment, fingerprint, init, template,
@@ -80,11 +77,6 @@ impl ConfigLoader for FileConfigLoader<'_> {
             .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
         document.validate()?;
         let fingerprint = fingerprint::config_hash(&source, directory)?;
-        let networks = match document.run.options.get("network") {
-            Some(OptionValue::Text(name)) => vec![name.clone()],
-            Some(OptionValue::List(names)) => names.clone(),
-            _ => Vec::new(),
-        };
 
         let env_files = environment::load_files(
             std::iter::once(&document.exec)
@@ -139,7 +131,6 @@ impl ConfigLoader for FileConfigLoader<'_> {
             run: RunConfig {
                 manage_network: document.run.manage_network,
                 check_zenvfile_changes: document.run.check_zenvfile_changes,
-                networks,
                 command,
                 init_commands,
                 options: document.run.options,

@@ -39,8 +39,9 @@ pub fn execute(
     }
     let container = match existing {
         None => {
-            if config.run.manage_network && !config.run.networks.is_empty() {
-                runtime.create_networks(&config.run.networks);
+            let networks = config.manage_network();
+            if !networks.is_empty() {
+                runtime.create_networks(&networks);
             }
             let container = runtime.run(&config.run_request())?;
             for command in &config.run.init_commands {
@@ -113,8 +114,9 @@ fn remove_container(
 }
 
 fn remove_networks(runtime: &(impl ContainerRuntime + ?Sized), config: &Config) {
-    if config.run.manage_network && !config.run.networks.is_empty() {
-        runtime.remove_networks(&config.run.networks);
+    let networks = config.manage_network();
+    if !networks.is_empty() {
+        runtime.remove_networks(&networks);
     }
 }
 

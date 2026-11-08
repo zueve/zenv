@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::{
     Error, Result,
-    runtime::{ExecRequest, Options, RunRequest},
+    runtime::{ExecRequest, OptionValue, Options, RunRequest},
 };
 
 mod context;
@@ -46,7 +46,6 @@ pub struct MainConfig {
 pub struct RunConfig {
     pub manage_network: bool,
     pub check_zenvfile_changes: bool,
-    pub networks: Vec<String>,
     pub command: Vec<String>,
     pub init_commands: Vec<ExecRequest>,
     pub options: Options,
@@ -113,6 +112,18 @@ impl Config {
             options: settings.options.clone(),
             env: settings.env.clone(),
         })
+    }
+
+    /// Networks to create or remove under the current management policy.
+    pub fn manage_network(&self) -> Vec<String> {
+        if !self.run.manage_network {
+            return Vec::new();
+        }
+        match self.run.options.get("network") {
+            Some(OptionValue::Text(name)) => vec![name.clone()],
+            Some(OptionValue::List(names)) => names.clone(),
+            _ => Vec::new(),
+        }
     }
 }
 
