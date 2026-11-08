@@ -42,20 +42,25 @@ def call(config, command):
         saved_hash = labels.get(const.CONFIG_HASH_LABEL)
         if saved_hash != config['main']['config_hash']:
             click.echo(
-                'Warning: container creation settings do not match Zenvfile. '
-                'Run `zenv rm` to apply the updated settings.',
+                'Warning: container creation settings do not match Zenvfile.',
                 err=True,
             )
             if not sys.stdin.isatty():
                 raise click.ClickException(
-                    'Cannot confirm continuation without interactive stdin. '
+                    'Cannot confirm recreation without interactive stdin. '
                     'Set run.check_zenvfile_changes = false for '
                     'noninteractive use.'
                 )
-            click.confirm(
-                'Continue using the existing container?',
-                default=False, abort=True, err=True,
-            )
+            if click.confirm(
+                'Recreate the container with the updated settings?',
+                default=False, err=True,
+            ):
+                rm(
+                    container_name,
+                    config['run']['options'].get('network'),
+                    config['run'].get('manage_network', True),
+                )
+                return call(config, command)
 
     # composite environments
     command, exec_options = get_command_with_options(
@@ -74,25 +79,14 @@ def call(config, command):
         ]
         run_command, _ = get_command_with_options(
             config['run']['command'], config['aliases'], {})
-        created_networks = (
-            networks.ensure_networks(options.get('network'))
-            if config['run'].get('manage_network', True) else []
+        if config['run'].get('manage_network', True):
+            networks.create(options.get('network'))
+        exit_code = run(
+            image=config['main']['image'],
+            command=run_command,
+            options=utils.build_docker_options(options),
+            path=config['main']['zenvfilepath']
         )
-        exit_code = None
-        try:
-            exit_code = run(
-                image=config['main']['image'],
-                command=run_command,
-                options=utils.build_docker_options(options),
-                path=config['main']['zenvfilepath']
-            )
-        finally:
-            if exit_code != 0:
-                for network_id in created_networks:
-                    try:
-                        networks.remove_if_unused(network_id)
-                    except click.ClickException as error:
-                        click.echo('Warning: {}'.format(error), err=True)
         if exit_code:
             return exit_code
 
@@ -170,21 +164,19 @@ def stop(container_name):
 
 def rm(container_name, network=None, manage_network=True):
     container = inspect_container(container_name)
-    if container is None:
-        return
-    container_id = container['Id']
-    if container['State']['Status'] == 'running':
-        cmd = ['docker', 'stop', '--', container_id]
+    if container is not None:
+        container_id = container['Id']
+        if container['State']['Status'] == 'running':
+            cmd = ['docker', 'stop', '--', container_id]
+            logger.debug(cmd)
+            if subprocess.run(cmd).returncode:
+                raise click.ClickException('Could not stop the container.')
+        cmd = ['docker', 'rm', '--', container_id]
         logger.debug(cmd)
         if subprocess.run(cmd).returncode:
-            raise click.ClickException('Could not stop the container.')
-    cmd = ['docker', 'rm', '--', container_id]
-    logger.debug(cmd)
-    if subprocess.run(cmd).returncode:
-        raise click.ClickException('Could not remove the container.')
+            raise click.ClickException('Could not remove the container.')
     if manage_network:
-        for network_name in networks.configured_networks(network):
-            networks.remove_if_unused(network_name)
+        networks.remove(network)
 
 
 def stop_all(exclude_containers=()):

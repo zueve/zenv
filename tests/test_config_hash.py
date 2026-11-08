@@ -2,7 +2,7 @@ import io
 import json
 from copy import deepcopy
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import click
 import pytest
@@ -237,26 +237,25 @@ def test_matching_container_runs_commands(project, monkeypatch, state, capsys):
     assert capsys.readouterr().err == ''
 
 
-@pytest.mark.parametrize('state', ['running', 'exited'])
+@pytest.mark.parametrize('state', ['running', 'exited', 'created'])
 @pytest.mark.parametrize('saved_hash', ['outdated', None])
-def test_mismatch_warns_and_continues(
+def test_declined_recreation_warns_and_continues(
         project, monkeypatch, state, saved_hash, capsys):
     config = utils.get_config(str(project))
     _, run, execute, process = runtime(
         monkeypatch, config, container(config, state, saved_hash)
     )
     monkeypatch.setattr(core.sys.stdin, 'isatty', lambda: True)
-    confirm = Mock(return_value=True)
+    confirm = Mock(return_value=False)
     monkeypatch.setattr(core.click, 'confirm', confirm)
     assert core.call(config, ['work']) == 27
     confirm.assert_called_once_with(
-        'Continue using the existing container?',
-        default=False, abort=True, err=True,
+        'Recreate the container with the updated settings?',
+        default=False, err=True,
     )
     output = capsys.readouterr()
     assert output.out == ''
     assert 'Warning:' in output.err
-    assert 'zenv rm' in output.err
     run.assert_not_called()
     execute.assert_called_once()
     if state == 'running':
@@ -346,44 +345,111 @@ class TerminalInput(io.BytesIO):
 
 
 @pytest.mark.parametrize('exit_code', [0, 27])
-def test_confirmed_mismatch_preserves_command_exit_code(
-        project, monkeypatch, exit_code):
-    config = utils.get_config(str(project))
-    _, run, execute, process = runtime(
-        monkeypatch, config, container(config, saved_hash='outdated')
+@pytest.mark.parametrize('state', ['running', 'exited', 'created'])
+@pytest.mark.parametrize('saved_hash', ['outdated', None])
+def test_confirmed_recreation_initializes_and_retries_original_command(
+        project, monkeypatch, exit_code, state, saved_hash):
+    project.write_text(
+        project.read_text().replace(
+            'init_commands = []', 'init_commands = [["setup"]]'
+        ) + '[aliases]\nwork.command = ["tool", "alias arg"]\n'
     )
-    execute.return_value = exit_code
+    config = utils.get_config(str(project))
+    existing = container(config, state, saved_hash)
+    inspect, run, execute, process = runtime(
+        monkeypatch, config, existing
+    )
+    inspect.side_effect = [existing, existing, None]
+    execute.side_effect = [0, exit_code]
     output = CliRunner().invoke(cli, [
-        'exec', '--zenvfile', str(project), 'work',
+        'exec', '--zenvfile', str(project), 'work', 'a b', '--flag',
     ], input=TerminalInput(b'y\n'))
     assert output.exit_code == exit_code
     assert 'Warning:' in output.output
-    assert 'zenv rm' in output.output
+    assert 'Recreate the container with the updated settings?' in output.output
     assert 'Traceback' not in output.output
-    run.assert_not_called()
-    execute.assert_called_once()
-    process.assert_not_called()
+    assert inspect.call_args_list == [call('zenv-test')] * 3
+    run.assert_called_once()
+    assert execute.call_count == 2
+    assert execute.call_args_list[0][0][:2] == ('zenv-test', ['setup'])
+    assert execute.call_args_list[1][0][:2] == (
+        'zenv-test', ['tool', 'alias arg', 'a b', '--flag']
+    )
+    expected = [call(['docker', 'rm', '--', 'container-id'])]
+    if state == 'running':
+        expected.insert(0, call(['docker', 'stop', '--', 'container-id']))
+    assert process.call_args_list == expected
 
 
-@pytest.mark.parametrize('answer', [b'n\n', b'\n', b''])
-@pytest.mark.parametrize('state', ['running', 'exited'])
-def test_declined_mismatch_does_not_start_or_execute(
+@pytest.mark.parametrize('answer', [b'n\n', b'\n'])
+@pytest.mark.parametrize('state', ['running', 'exited', 'created'])
+def test_declined_recreation_executes_without_removal(
         project, monkeypatch, answer, state):
     config = utils.get_config(str(project))
     _, run, execute, process = runtime(
         monkeypatch, config, container(config, state, 'outdated')
     )
+    remove = Mock()
+    monkeypatch.setattr(core, 'rm', remove)
+    output = CliRunner().invoke(cli, [
+        'exec', '--zenvfile', str(project), 'work',
+    ], input=TerminalInput(answer))
+    assert output.exit_code == 27
+    assert 'Recreate the container with the updated settings?' in output.output
+    remove.assert_not_called()
+    run.assert_not_called()
+    execute.assert_called_once()
+    if state == 'running':
+        process.assert_not_called()
+    else:
+        process.assert_called_once_with(['docker', 'start', 'zenv-test'])
+
+
+@pytest.mark.parametrize('manage_network', [True, False])
+def test_failed_recreation_does_not_start_or_execute(
+        project, monkeypatch, manage_network):
+    project.write_text(
+        project.read_text().replace(
+            'init_commands = []',
+            'init_commands = []\nmanage_network = {}'.format(
+                str(manage_network).lower()
+            ),
+        ) + '[run.options]\nnetwork = "project-dev"\n'
+    )
+    config = utils.get_config(str(project))
+    _, run, execute, process = runtime(
+        monkeypatch, config, container(config, 'running', 'outdated')
+    )
+    remove = Mock(side_effect=click.ClickException('Cannot remove container'))
+    monkeypatch.setattr(core, 'rm', remove)
     prepare = Mock()
     monkeypatch.setattr(core, 'get_command_with_options', prepare)
     output = CliRunner().invoke(cli, [
         'exec', '--zenvfile', str(project), 'work',
-    ], input=TerminalInput(answer))
+    ], input=TerminalInput(b'y\n'))
     assert output.exit_code == 1
-    assert 'Continue using the existing container?' in output.stderr
+    assert 'Cannot remove container' in output.output
+    remove.assert_called_once_with('zenv-test', 'project-dev', manage_network)
     prepare.assert_not_called()
     run.assert_not_called()
     execute.assert_not_called()
     process.assert_not_called()
+
+
+def test_failed_creation_after_removal_does_not_execute(project, monkeypatch):
+    config = utils.get_config(str(project))
+    existing = container(config, saved_hash='outdated')
+    inspect, run, execute, _ = runtime(monkeypatch, config, existing)
+    inspect.side_effect = [existing, None]
+    remove = Mock()
+    monkeypatch.setattr(core, 'rm', remove)
+    monkeypatch.setattr(core.sys.stdin, 'isatty', lambda: True)
+    monkeypatch.setattr(core.click, 'confirm', Mock(return_value=True))
+    run.return_value = 7
+    assert core.call(config, ['work']) == 7
+    remove.assert_called_once_with('zenv-test', None, True)
+    run.assert_called_once()
+    execute.assert_not_called()
 
 
 def test_noninteractive_mismatch_does_not_consume_stdin(project, monkeypatch):

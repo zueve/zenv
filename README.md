@@ -102,11 +102,13 @@ Zenv records a fingerprint of the container creation settings in the Docker labe
 commands, including the aliases and execution settings used by initialization.
 
 If these settings change, Zenv prints a warning to stderr and asks whether to
-continue using the existing container (default: no). The same check applies to
-containers created before fingerprint tracking. Confirmation happens before
-starting the container or executing the command. Accepting preserves the
-command's stdout and exit code. With piped or noninteractive stdin, a mismatch
-stops execution without reading input.
+recreate the container (default: no). Answering `y` removes the existing
+container, creates it with the updated configuration, runs initialization and
+retries the original command. Answering `n` or pressing Enter continues using
+the existing container. The same check applies to containers created before
+fingerprint tracking. Confirmation happens before starting the container or
+executing the command and preserves the command's stdout and exit code. With
+piped or noninteractive stdin, a mismatch stops execution without reading input.
 
 Fingerprint checking is enabled by default and can be disabled:
 
@@ -146,21 +148,19 @@ network creation and deletion. The configured network is still passed to Docker
 and must already exist. This switch takes effect immediately and does not
 require recreating the container.
 
-Before creating the container, Zenv creates a missing network with the default
-bridge driver. Existing networks are reused. Other containers can join the same
-network through their Docker or Compose configuration. A list of network names
-is also supported.
+Before creating the container, Zenv attempts `docker network create` for each
+configured network, with the label `zenv.managed-network=true`. A list of names
+is also supported. Existing networks are reused; network command errors and
+output are ignored.
 
-After `zenv rm` successfully removes the container, Zenv removes unused networks
-listed explicitly in the current `run.options.network` that were created by
-Zenv. Networks created outside Zenv are preserved.
-Networks still referenced by other containers, including stopped containers,
-are preserved too. If `run.options.network` is absent, no networks are created
-or removed. Other networks attached to the container are left untouched.
+On `zenv rm`, Zenv attempts `docker network rm` for the networks explicitly
+listed in the current `run.options.network`, even if the container is already
+absent. It does not check labels or ownership: unused networks created manually
+or through Compose can also be removed. Docker decides whether removal is
+allowed; errors are ignored. No networks are managed when the setting is absent.
 
-Built-in modes (`bridge`, `host`, `none`, `default`) and `container:<name-or-id>`
-are passed through without automatic network creation or removal. Extended
-Docker network syntax is passed through and requires an existing network.
+Set `manage_network = false` when automatic creation and deletion are unwanted,
+including when using system network modes or extended Docker network syntax.
 
 ### Other commands
 

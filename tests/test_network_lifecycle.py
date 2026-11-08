@@ -5,7 +5,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from zenv import const, core, utils
+from zenv import core, utils
 from zenv.cli import cli
 
 
@@ -27,43 +27,41 @@ def missing_container(monkeypatch):
     return execute
 
 
-def test_network_is_ready_before_container_creation(config, monkeypatch):
+def test_network_creation_is_attempted_before_container_creation(
+        config, monkeypatch):
     assert config['run']['manage_network'] is True
     execute = missing_container(monkeypatch)
     events = []
-
-    def ensure(spec):
-        events.append(('network', spec))
-        return ['created-network-id']
+    monkeypatch.setattr(
+        core.networks, 'create',
+        lambda spec: events.append(('network', spec)),
+    )
 
     def run(**kwargs):
         events.append(('run', kwargs['options']))
         return 0
 
-    monkeypatch.setattr(core.networks, 'ensure_networks', ensure)
     monkeypatch.setattr(core, 'run', run)
-    cleanup = Mock()
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
     assert core.call(config, ['work']) == 23
     assert events[0] == ('network', 'project-dev')
     assert events[1][0] == 'run'
     options = events[1][1]
     assert options[options.index('--network') + 1] == 'project-dev'
     execute.assert_called_once()
-    cleanup.assert_not_called()
 
 
-def test_network_creation_failure_prevents_container_launch(
-        config, monkeypatch):
+@pytest.mark.parametrize('return_code', [0, 1])
+def test_network_create_result_does_not_prevent_container_launch(
+        config, monkeypatch, return_code):
     execute = missing_container(monkeypatch)
-    ensure = Mock(side_effect=click.ClickException('cannot create network'))
-    run = Mock()
-    monkeypatch.setattr(core.networks, 'ensure_networks', ensure)
+    process = Mock(return_value=SimpleNamespace(returncode=return_code))
+    monkeypatch.setattr(core.networks.subprocess, 'run', process)
+    run = Mock(return_value=0)
     monkeypatch.setattr(core, 'run', run)
-    with pytest.raises(click.ClickException, match='cannot create network'):
-        core.call(config, ['work'])
-    run.assert_not_called()
-    execute.assert_not_called()
+    assert core.call(config, ['work']) == 23
+    process.assert_called_once()
+    run.assert_called_once()
+    execute.assert_called_once()
 
 
 def test_creation_without_configured_network_does_not_touch_networks(
@@ -71,10 +69,10 @@ def test_creation_without_configured_network_does_not_touch_networks(
     missing_container(monkeypatch)
     config['run']['options'].pop('network')
     monkeypatch.setattr(core, 'run', Mock(return_value=0))
-    network_process = Mock()
-    monkeypatch.setattr(core.networks, '_run', network_process)
+    process = Mock()
+    monkeypatch.setattr(core.networks.subprocess, 'run', process)
     assert core.call(config, ['work']) == 23
-    network_process.assert_not_called()
+    process.assert_not_called()
 
 
 @pytest.mark.parametrize('return_code', [0, 125])
@@ -83,88 +81,54 @@ def test_disabled_management_passes_network_without_managing_it(
     execute = missing_container(monkeypatch)
     config['run']['manage_network'] = False
     run = Mock(return_value=return_code)
-    ensure = Mock()
-    cleanup = Mock()
+    create = Mock()
     monkeypatch.setattr(core, 'run', run)
-    monkeypatch.setattr(core.networks, 'ensure_networks', ensure)
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
+    monkeypatch.setattr(core.networks, 'create', create)
     assert core.call(config, ['work']) == (return_code or 23)
     options = run.call_args[1]['options']
     assert options[options.index('--network') + 1] == 'project-dev'
-    ensure.assert_not_called()
-    cleanup.assert_not_called()
+    create.assert_not_called()
     assert execute.call_count == int(return_code == 0)
 
 
-@pytest.mark.parametrize('return_code', [125, OSError('cannot launch Docker')])
-def test_failed_launch_cleans_only_new_networks(
-        config, monkeypatch, return_code):
+def test_failed_container_launch_does_not_roll_back_networks(
+        config, monkeypatch):
     execute = missing_container(monkeypatch)
-    monkeypatch.setattr(
-        core.networks, 'ensure_networks',
-        Mock(return_value=['created-network-id']),
-    )
-    run = Mock(return_value=return_code)
-    if isinstance(return_code, Exception):
-        run.side_effect = return_code
-    monkeypatch.setattr(core, 'run', run)
-    cleanup = Mock()
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
-    if isinstance(return_code, Exception):
-        with pytest.raises(OSError, match='cannot launch Docker'):
-            core.call(config, ['work'])
-    else:
-        assert core.call(config, ['work']) == return_code
-    cleanup.assert_called_once_with('created-network-id')
+    process = Mock(return_value=SimpleNamespace(returncode=0))
+    monkeypatch.setattr(core.networks.subprocess, 'run', process)
+    monkeypatch.setattr(core, 'run', Mock(return_value=125))
+    assert core.call(config, ['work']) == 125
+    assert process.call_count == 1
+    assert process.call_args.args[0][1:3] == ['network', 'create']
     execute.assert_not_called()
 
 
-def test_rollback_failure_does_not_hide_launch_failure(
-        config, monkeypatch, capsys):
-    missing_container(monkeypatch)
-    monkeypatch.setattr(
-        core.networks, 'ensure_networks', Mock(return_value=['new-id'])
-    )
-    monkeypatch.setattr(core, 'run', Mock(return_value=125))
-    monkeypatch.setattr(
-        core.networks, 'remove_if_unused',
-        Mock(side_effect=click.ClickException('cleanup failed')),
-    )
-    assert core.call(config, ['work']) == 125
-    assert 'cleanup failed' in capsys.readouterr().err
-
-
 @pytest.mark.parametrize('state', ['running', 'exited'])
-def test_existing_container_does_not_create_newly_configured_network(
+def test_existing_container_does_not_create_networks(
         config, monkeypatch, state):
     config['run']['check_zenvfile_changes'] = False
     monkeypatch.setattr(core, 'inspect_container', Mock(return_value={
-        'Config': {'Labels': {const.CONFIG_HASH_LABEL: 'previous-settings'}},
         'State': {'Status': state},
     }))
-    ensure = Mock()
-    monkeypatch.setattr(core.networks, 'ensure_networks', ensure)
+    create = Mock()
+    monkeypatch.setattr(core.networks, 'create', create)
     monkeypatch.setattr(core, 'exec_', Mock(return_value=0))
     monkeypatch.setattr(
         core.subprocess, 'run',
         Mock(return_value=SimpleNamespace(returncode=0)),
     )
     assert core.call(config, ['work']) == 0
-    ensure.assert_not_called()
+    create.assert_not_called()
 
 
-def inspected_container(state='running'):
+def inspected_container():
     return {
-        'Id': 'original-container-id',
-        'State': {'Status': state},
-        'NetworkSettings': {'Networks': {
-            'original-network': {'NetworkID': 'original-network-id'},
-            'bridge': {'NetworkID': 'builtin-bridge-id'},
-        }},
+        'Id': 'original-container-id', 'State': {'Status': 'running'},
+        'NetworkSettings': {'Networks': {'other-network': {}}},
     }
 
 
-def test_removal_cleans_only_explicitly_configured_network(
+def test_removal_uses_only_configured_network_after_container_removal(
         monkeypatch):
     monkeypatch.setattr(
         core, 'inspect_container', Mock(return_value=inspected_container())
@@ -177,8 +141,8 @@ def test_removal_cleans_only_explicitly_configured_network(
 
     monkeypatch.setattr(core.subprocess, 'run', process)
     monkeypatch.setattr(
-        core.networks, 'remove_if_unused',
-        lambda network_id: events.append(('cleanup', network_id)),
+        core.networks, 'remove',
+        lambda spec: events.append(('cleanup', spec)),
     )
     core.rm('zenv-test', network='configured-network')
     assert events == [
@@ -188,37 +152,34 @@ def test_removal_cleans_only_explicitly_configured_network(
     ]
 
 
-@pytest.mark.parametrize('network', [
-    None, '', [], 'bridge', 'container:other',
-])
-def test_removal_without_named_setting_leaves_attached_networks(
+@pytest.mark.parametrize('network', [None, []])
+def test_removal_without_configured_network_leaves_attached_networks(
         monkeypatch, network):
     monkeypatch.setattr(
         core, 'inspect_container', Mock(return_value=inspected_container())
     )
     process = Mock(return_value=SimpleNamespace(returncode=0))
-    cleanup = Mock()
     monkeypatch.setattr(core.subprocess, 'run', process)
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
     core.rm('zenv-test', network=network)
     assert process.call_count == 2
-    cleanup.assert_not_called()
 
 
 def test_disabled_management_never_removes_configured_network(monkeypatch):
     monkeypatch.setattr(
         core, 'inspect_container', Mock(return_value=inspected_container())
     )
-    process = Mock(return_value=SimpleNamespace(returncode=0))
-    cleanup = Mock()
-    monkeypatch.setattr(core.subprocess, 'run', process)
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
+    monkeypatch.setattr(
+        core.subprocess, 'run',
+        Mock(return_value=SimpleNamespace(returncode=0)),
+    )
+    remove = Mock()
+    monkeypatch.setattr(core.networks, 'remove', remove)
     core.rm('zenv-test', network='project-dev', manage_network=False)
-    assert process.call_count == 2
-    cleanup.assert_not_called()
+    remove.assert_not_called()
 
 
-def test_cli_passes_only_configured_network_to_removal(config, monkeypatch):
+def test_cli_passes_configured_network_and_management_flag(
+        config, monkeypatch):
     remove = Mock()
     monkeypatch.setattr(core, 'rm', remove)
     path = '{}/Zenvfile'.format(config['main']['zenvfilepath'])
@@ -230,12 +191,6 @@ def test_cli_passes_only_configured_network_to_removal(config, monkeypatch):
     with open(path) as stream:
         source = stream.read()
     with open(path, 'w') as stream:
-        stream.write(source.replace('network = "project-dev"', ''))
-    assert runner.invoke(cli, ['rm', '--zenvfile', path]).exit_code == 0
-    remove.assert_called_once_with('zenv-test', None, True)
-
-    remove.reset_mock()
-    with open(path, 'w') as stream:
         stream.write(source.replace(
             '[run]\n', '[run]\nmanage_network = false\n'
         ))
@@ -244,7 +199,7 @@ def test_cli_passes_only_configured_network_to_removal(config, monkeypatch):
 
 
 @pytest.mark.parametrize('failure_at', ['stop', 'rm'])
-def test_failed_container_removal_never_cleans_networks(
+def test_failed_container_removal_does_not_remove_networks(
         monkeypatch, failure_at):
     monkeypatch.setattr(
         core, 'inspect_container', Mock(return_value=inspected_container())
@@ -253,23 +208,32 @@ def test_failed_container_removal_never_cleans_networks(
     def process(command):
         return SimpleNamespace(returncode=int(command[1] == failure_at))
 
-    process_mock = Mock(side_effect=process)
-    monkeypatch.setattr(core.subprocess, 'run', process_mock)
-    cleanup = Mock()
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
+    monkeypatch.setattr(core.subprocess, 'run', Mock(side_effect=process))
+    remove = Mock()
+    monkeypatch.setattr(core.networks, 'remove', remove)
     with pytest.raises(click.ClickException):
         core.rm('zenv-test', network='project-dev')
-    cleanup.assert_not_called()
-    if failure_at == 'stop':
-        assert process_mock.call_count == 1
+    remove.assert_not_called()
 
 
-def test_removing_an_absent_container_does_not_touch_networks(monkeypatch):
+def test_removing_absent_container_attempts_network_removal(monkeypatch):
     monkeypatch.setattr(core, 'inspect_container', Mock(return_value=None))
     process = Mock()
-    cleanup = Mock()
+    remove = Mock()
     monkeypatch.setattr(core.subprocess, 'run', process)
-    monkeypatch.setattr(core.networks, 'remove_if_unused', cleanup)
+    monkeypatch.setattr(core.networks, 'remove', remove)
     core.rm('zenv-test', network='project-dev')
     process.assert_not_called()
-    cleanup.assert_not_called()
+    remove.assert_called_once_with('project-dev')
+
+
+def test_network_removal_error_does_not_fail_cli(config, monkeypatch):
+    monkeypatch.setattr(core, 'inspect_container', Mock(return_value=None))
+    monkeypatch.setattr(
+        core.networks.subprocess, 'run',
+        Mock(return_value=SimpleNamespace(returncode=1)),
+    )
+    path = '{}/Zenvfile'.format(config['main']['zenvfilepath'])
+    output = CliRunner().invoke(cli, ['rm', '--zenvfile', path])
+    assert output.exit_code == 0
+    assert output.output == ''
