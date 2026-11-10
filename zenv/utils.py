@@ -19,9 +19,10 @@ def load_dotenv(dotenvfile):
     try:
         with open(dotenvfile) as file:
             environments = [
-                bind.original.string.strip()
+                f'{bind.key}={bind.value}'
+                if bind.value is not None else bind.key
                 for bind in parser.parse_stream(file)
-                if not bind.error
+                if not bind.error and bind.key is not None
             ]
     except FileNotFoundError:
         raise click.ClickException(f'Env file not found {dotenvfile}')
