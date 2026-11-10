@@ -85,28 +85,13 @@ pub struct Config {
 }
 
 impl Config {
-    /// Hash resolved container creation settings without reading external state.
+    /// Hash resolved run settings, excluding initialization and execution settings.
     pub fn run_hash(&self) -> String {
-        let init_commands: Vec<_> = self
-            .run
-            .init_commands
-            .iter()
-            .map(|request| {
-                json!({
-                    "command": request.command.iter()
-                        .map(|value| value.as_encoded_bytes()).collect::<Vec<_>>(),
-                    "options": request.options,
-                    "env": request.env.iter()
-                        .map(|value| value.as_encoded_bytes()).collect::<Vec<_>>(),
-                })
-            })
-            .collect();
         let settings = json!({
             "project_directory": self.directory.as_os_str().as_encoded_bytes(),
             "image": self.main.image,
             "command": self.run.command,
             "options": self.run.options,
-            "init_commands": init_commands,
         });
         format!("{:x}", Sha256::digest(settings.to_string().as_bytes()))
     }

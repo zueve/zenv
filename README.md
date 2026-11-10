@@ -161,13 +161,12 @@ operations without printing command arguments or environment secrets.
 
 `Config::run_hash()` calculates a SHA-256 fingerprint from the resolved container
 creation settings. The Docker adapter stores it in `zenv.config-hash`. It covers
-the project directory, image, run options, startup command and initialization
-requests, including their resolved options and environment. Changes to host
-variables, UID/GID/TTY, invocation paths or dotenv values change the fingerprint
-when they affect these creation settings. Ordinary exec settings, policy flags,
-comments and unused aliases do not affect it. Image tag contents and files
-referenced by commands are not fingerprinted. Omitted init execution settings
-and explicitly empty defaults have the same fingerprint.
+the project directory, image, run options and startup command. Changes to host
+variables, UID/GID/TTY or invocation paths change the fingerprint only when they
+affect these run settings. Initialization commands and their options and
+environment, ordinary exec settings, policy flags, comments and unused aliases
+do not affect it. Image tag contents and files referenced by commands are not
+fingerprinted.
 
 When an existing container has a different fingerprint, or none, Zenv warns on
 stderr and asks whether to recreate it (default: no). Answer `y` to remove the

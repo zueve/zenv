@@ -932,10 +932,6 @@ fn creation_declarations_change_the_fingerprint() {
         ),
         ("[run.options]", "[run.options]\ndetach = false"),
         ("365d", "30d"),
-        ("--first", "--changed"),
-        ("provision", "different-provisioner"),
-        ("0:0", "123:456"),
-        ("MODE=setup", "MODE=changed"),
     ] {
         let source = FINGERPRINT_SETUP.replace(before, after);
         assert_ne!(
@@ -954,6 +950,14 @@ fn unrelated_configuration_does_not_change_the_fingerprint() {
         FINGERPRINT_SETUP.replace("[main]", "[main]\nname = 'other'\ndebug = true"),
         FINGERPRINT_SETUP.replace("unused-command", "other-unused-command"),
         FINGERPRINT_SETUP.replace("Initialize", "New description"),
+        FINGERPRINT_SETUP.replace("--first", "--changed"),
+        FINGERPRINT_SETUP.replace("provision", "different-provisioner"),
+        FINGERPRINT_SETUP.replace("0:0", "123:456"),
+        FINGERPRINT_SETUP.replace("MODE=setup", "MODE=changed"),
+        FINGERPRINT_SETUP.replace(
+            "init_commands = [[\"setup\", \"--first\"]]",
+            "init_commands = []",
+        ),
         format!(
             "{FINGERPRINT_SETUP}\n[exec]\nenv_excludes = ['KEY']\n[exec.options]\nuser = '42'\nenv = ['KEY=new']"
         ),
@@ -989,7 +993,7 @@ version = 1
 }
 
 #[test]
-fn omitted_and_explicit_empty_init_exec_settings_have_the_same_fingerprint() {
+fn init_execution_settings_do_not_change_the_fingerprint() {
     let source = "[run]\ninit_commands = [['setup']]\n[aliases.setup]\ncommand = ['provision']\n";
     let (directory, mut host) = project(source);
     host.environment.insert("KEY".into(), "value".into());
@@ -1018,7 +1022,7 @@ fn omitted_and_explicit_empty_init_exec_settings_have_the_same_fingerprint() {
         "[aliases.setup.exec]\nenv_excludes = ['KEY']\n",
         "[aliases.setup.exec.options]\nuser = '42'\n",
     ] {
-        assert_ne!(
+        assert_eq!(
             fingerprint_of(directory.path(), &format!("{source}{suffix}"), &host),
             baseline.run_hash(),
             "{suffix}"
@@ -1090,7 +1094,7 @@ fn scalar_singleton_and_equivalent_flag_values_have_the_same_fingerprint() {
 }
 
 #[test]
-fn resolved_invocation_values_change_the_run_hash_when_used_by_init() {
+fn resolved_invocation_values_do_not_change_the_run_hash_when_only_used_by_init() {
     let (directory, host, config) = config(FINGERPRINT_SETUP);
     let child = directory.path().join("nested");
     fs::create_dir(&child).unwrap();
@@ -1107,7 +1111,7 @@ fn resolved_invocation_values_change_the_run_hash_when_used_by_init() {
             _ => unreachable!(),
         }
         let loaded = FileConfigLoader::new(&changed).load(None).unwrap();
-        assert_ne!(loaded.run_hash(), config.run_hash(), "{change}");
+        assert_eq!(loaded.run_hash(), config.run_hash(), "{change}");
     }
     let (_other_directory, _other_host, other) = self::config(FINGERPRINT_SETUP);
     assert_ne!(other.run_hash(), config.run_hash());
@@ -1136,15 +1140,7 @@ fn host_changes_do_not_change_the_run_hash_without_affected_creation_settings() 
 fn run_hash_reflects_current_creation_settings_and_ignores_execution_policy() {
     let (_directory, _host, baseline) = config(FINGERPRINT_SETUP);
     let previous = baseline.run_hash();
-    for change in [
-        "image",
-        "directory",
-        "command",
-        "options",
-        "init_command",
-        "init_options",
-        "init_env",
-    ] {
+    for change in ["image", "directory", "command", "options"] {
         let mut changed = baseline.clone();
         match change {
             "image" => changed.main.image.push_str("-changed"),
@@ -1156,6 +1152,13 @@ fn run_hash_reflects_current_creation_settings_and_ignores_execution_policy() {
                     .options
                     .insert("network".into(), IndexSet::from(["changed".into()]));
             }
+            _ => unreachable!(),
+        }
+        assert_ne!(changed.run_hash(), previous, "{change}");
+    }
+    for change in ["init_command", "init_options", "init_env", "init_count"] {
+        let mut changed = baseline.clone();
+        match change {
             "init_command" => changed.run.init_commands[0]
                 .command
                 .push(OsString::from_vec(vec![0xff])),
@@ -1167,20 +1170,10 @@ fn run_hash_reflects_current_creation_settings_and_ignores_execution_policy() {
             "init_env" => changed.run.init_commands[0]
                 .env
                 .push(OsString::from_vec(vec![b'K', b'=', 0xff])),
+            "init_count" => changed.run.init_commands.clear(),
             _ => unreachable!(),
         }
-        assert_ne!(changed.run_hash(), previous, "{change}");
-        let first = changed.run_hash();
-        if change == "init_command" {
-            *changed.run.init_commands[0].command.last_mut().unwrap() =
-                OsString::from_vec(vec![0xfe]);
-            assert_ne!(changed.run_hash(), first);
-        }
-        if change == "init_env" {
-            *changed.run.init_commands[0].env.last_mut().unwrap() =
-                OsString::from_vec(vec![b'K', b'=', 0xfe]);
-            assert_ne!(changed.run_hash(), first);
-        }
+        assert_eq!(changed.run_hash(), previous, "{change}");
     }
     let mut changed = baseline;
     changed.main.name.push_str("-changed");
@@ -1196,12 +1189,12 @@ fn run_hash_reflects_current_creation_settings_and_ignores_execution_policy() {
 }
 
 #[test]
-fn active_and_escaped_init_placeholders_have_different_fingerprints() {
+fn active_and_escaped_init_placeholders_have_the_same_fingerprint() {
     let active =
         "[run]\ninit_commands = [['work']]\n[aliases]\nwork = { command = ['echo', '{uid}'] }";
     let (directory, host, config) = config(active);
     let literal = active.replace("'{uid}'", "'{{uid}}'");
-    assert_ne!(
+    assert_eq!(
         fingerprint_of(directory.path(), &literal, &host),
         config.run_hash()
     );
@@ -1221,7 +1214,7 @@ fn equivalent_expanded_startup_commands_have_the_same_fingerprint() {
 }
 
 #[test]
-fn init_env_file_contents_change_the_run_hash() {
+fn init_env_file_contents_do_not_change_the_run_hash() {
     let source = "[run]\ninit_commands = [['setup']]\n[exec]\nenv_file = '.env'\n[aliases.setup]\ncommand = ['setup-command']\n[aliases.setup.exec]\nenv_file = '.env'";
     let (directory, host) = project(source);
     let path = directory.path().join(".env");
@@ -1238,7 +1231,11 @@ fn init_env_file_contents_change_the_run_hash() {
     fs::write(directory.path().join(DEFAULT_FILENAME), source).unwrap();
     fs::write(path, "KEY=after\n").unwrap();
     let after = FileConfigLoader::new(&host).load(None).unwrap();
-    assert_ne!(before.run_hash(), after.run_hash());
+    assert_eq!(before.run_hash(), after.run_hash());
+    assert_ne!(
+        before.run.init_commands[0].env,
+        after.run.init_commands[0].env
+    );
     assert_ne!(before.exec.env, after.exec.env);
 }
 
