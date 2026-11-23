@@ -4,24 +4,19 @@ import hashlib
 import json
 import os
 
+from .utils import resolve_alias
+
 
 def config_hash(config, project_directory):
     aliases = config['aliases']
 
-    def expand(command):
-        alias = aliases.get(command[0], {})
-        return alias.get('command', list(command[:1])) + list(command[1:])
-
     setup = {
         'project_directory': os.path.abspath(project_directory),
         'image': config['main']['image'],
-        'command': expand(config['run']['command']),
+        'command': resolve_alias(config['run']['command'], aliases)['command'],
         'options': config['run']['options'],
         'init_commands': [
-            {
-                'command': expand(command),
-                'exec': aliases.get(command[0], {}).get('exec', {}),
-            }
+            resolve_alias(command, aliases)
             for command in config['run']['init_commands']
         ],
     }

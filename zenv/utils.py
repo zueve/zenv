@@ -7,12 +7,23 @@ import click
 import toml
 from dotenv import parser
 
-from . import const, fingerprint
+from . import const
 
 
 class Default(dict):
     def __missing__(self, key):
         return '{' + key + '}'
+
+
+def resolve_alias(command, aliases):
+    """Expand the first word once and return the declared exec overrides."""
+    alias = aliases.get(command[0])
+    if alias is None:
+        return {'command': command, 'exec': {}}
+    return {
+        'command': alias['command'] + list(command[1:]),
+        'exec': alias.get('exec', {}),
+    }
 
 
 def load_dotenv(dotenvfile):
@@ -30,6 +41,8 @@ def load_dotenv(dotenvfile):
 
 
 def get_config(zenvfile=None):
+    from .fingerprint import config_hash
+
     if not zenvfile:
         zenvfile = find_file(os.getcwd(), fname=const.DEFAULT_FILENAME)
     if not zenvfile:
@@ -48,7 +61,7 @@ def get_config(zenvfile=None):
         toml.loads(source.format_map(symbolic_params)),
         toml.loads(const.CONFIG_TEMPLATE.format_map(symbolic_params)),
     )
-    creation_hash = fingerprint.config_hash(
+    creation_hash = config_hash(
         declared_config, os.path.dirname(zenvfile)
     )
 

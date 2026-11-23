@@ -303,6 +303,23 @@ def test_creation_and_start_failures_prevent_execution(project, monkeypatch):
     execute.assert_not_called()
 
 
+def test_run_alias_only_uses_its_exec_settings_for_exec(project, monkeypatch):
+    config = utils.get_config(str(project))
+    config['run']['command'] = ['serve', 'a b']
+    config['aliases']['serve'] = {
+        'command': ['server', '--foreground'],
+        'exec': {'env_file': str(project.parent / 'missing.env')},
+    }
+    _, run, _, _ = runtime(monkeypatch, config, None)
+
+    assert core.call(config, ['work']) == 27
+    assert run.call_args[1]['command'] == ['server', '--foreground', 'a b']
+
+    with pytest.raises(click.ClickException, match='Env file not found'):
+        core.call(config, ['serve'])
+    run.assert_called_once()
+
+
 def result(code=0, stdout=b'', stderr=b''):
     return SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr)
 
@@ -434,6 +451,22 @@ def test_failed_recreation_does_not_start_or_execute(
     run.assert_not_called()
     execute.assert_not_called()
     process.assert_not_called()
+
+
+def test_recreation_reuses_a_matching_replacement(project, monkeypatch):
+    config = utils.get_config(str(project))
+    outdated = container(config, saved_hash='outdated')
+    inspect, run, execute, _ = runtime(monkeypatch, config, outdated)
+    inspect.side_effect = [outdated, container(config)]
+    monkeypatch.setattr(core, 'rm', Mock())
+    monkeypatch.setattr(core.sys.stdin, 'isatty', lambda: True)
+    confirm = Mock(return_value=True)
+    monkeypatch.setattr(core.click, 'confirm', confirm)
+
+    assert core.call(config, ['work']) == 27
+    confirm.assert_called_once()
+    run.assert_not_called()
+    execute.assert_called_once()
 
 
 def test_failed_creation_after_removal_does_not_execute(project, monkeypatch):

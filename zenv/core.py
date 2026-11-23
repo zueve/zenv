@@ -9,94 +9,101 @@ from . import const, networks, utils
 
 
 def get_command_with_options(command, aliases, exec_params):
-    """
-    Find command by aliases and build exec docker options
-
-    """
-    exec_params = deepcopy(exec_params)
-    if command[0] in aliases:
-        key = command[0]
-        command = aliases[key]['command'] + list(command[1:])
-        command_exec_params = deepcopy(aliases[key].get('exec', {}))
-        exec_params = utils.merge_config(command_exec_params, exec_params)
-    dotenv_env = (
-        utils.load_dotenv(exec_params['env_file'])
-        if 'env_file' in exec_params and exec_params['env_file'] else {}
-    )
-    exec_options = exec_params.get('options', {})
+    """Prepare docker exec arguments with alias settings overriding defaults."""
+    resolved = utils.resolve_alias(command, aliases)
+    exec_params = utils.merge_config(deepcopy(resolved['exec']), exec_params)
+    env_file = exec_params.get('env_file')
+    dotenv_env = utils.load_dotenv(env_file) if env_file else []
+    exec_options = dict(exec_params.get('options', {}))
     exec_options['env'] = utils.composit_environment(
         dotenv_env=dotenv_env,
         zenvfile_env=exec_options.get('env', {}),
-        blacklist=exec_params.get('env_excludes', {})
+        blacklist=exec_params.get('env_excludes', ())
     )
-    docker_exec_options = utils.build_docker_options(exec_options)
-    return command, docker_exec_options
+    return resolved['command'], utils.build_docker_options(exec_options)
+
+
+def remove_environment(config):
+    """Remove the project container and clean up its configured networks."""
+    rm(
+        config['main']['name'],
+        config['run']['options'].get('network'),
+        config['run'].get('manage_network', True),
+    )
+
+
+def _container_for_command(config):
+    """Offer to remove an outdated container. Return None when absent."""
+    container_name = config['main']['name']
+    check_changes = config['run'].get('check_zenvfile_changes', True)
+    while True:
+        container = inspect_container(container_name)
+        if container is None or not check_changes:
+            return container
+        labels = container['Config'].get('Labels') or {}
+        if labels.get(const.CONFIG_HASH_LABEL) == config['main']['config_hash']:
+            return container
+
+        click.echo(
+            'Warning: container creation settings do not match Zenvfile.',
+            err=True,
+        )
+        if not sys.stdin.isatty():
+            raise click.ClickException(
+                'Cannot confirm recreation without interactive stdin. '
+                'Set run.check_zenvfile_changes = false for noninteractive use.'
+            )
+        if not click.confirm(
+            'Recreate the container with the updated settings?',
+            default=False, err=True,
+        ):
+            return container
+
+        # Another invocation may create a replacement before our next inspect.
+        remove_environment(config)
+
+
+def _create_container(config):
+    """Launch the configured container and run its initialization commands."""
+    main = config['main']
+    setup = config['run']
+    aliases = config['aliases']
+    options = {'name': main['name'], **setup['options']}
+    labels = options.get('label', [])
+    if isinstance(labels, str):
+        labels = [labels]
+    options['label'] = list(labels) + [
+        '{}={}'.format(const.CONFIG_HASH_LABEL, main['config_hash'])
+    ]
+    command = utils.resolve_alias(setup['command'], aliases)['command']
+    if setup.get('manage_network', True):
+        networks.create(options.get('network'))
+    exit_code = run(
+        image=main['image'], command=command,
+        options=utils.build_docker_options(options), path=main['zenvfilepath'],
+    )
+    if exit_code:
+        return exit_code
+
+    for init_command in setup['init_commands']:
+        command, exec_options = get_command_with_options(
+            init_command, aliases, {}
+        )
+        exec_(main['name'], command, exec_options)
+    return exit_code
 
 
 def call(config, command):
     container_name = config['main']['name']
-    container = inspect_container(container_name)
-    if (container is not None
-            and config['run'].get('check_zenvfile_changes', True)):
-        labels = container['Config'].get('Labels') or {}
-        saved_hash = labels.get(const.CONFIG_HASH_LABEL)
-        if saved_hash != config['main']['config_hash']:
-            click.echo(
-                'Warning: container creation settings do not match Zenvfile.',
-                err=True,
-            )
-            if not sys.stdin.isatty():
-                raise click.ClickException(
-                    'Cannot confirm recreation without interactive stdin. '
-                    'Set run.check_zenvfile_changes = false for '
-                    'noninteractive use.'
-                )
-            if click.confirm(
-                'Recreate the container with the updated settings?',
-                default=False, err=True,
-            ):
-                rm(
-                    container_name,
-                    config['run']['options'].get('network'),
-                    config['run'].get('manage_network', True),
-                )
-                return call(config, command)
-
-    # composite environments
+    container = _container_for_command(config)
     command, exec_options = get_command_with_options(
         command, config['aliases'], config['exec']
     )
 
     if container is None:
-        options = {'name': container_name, **config['run']['options']}
-        labels = options.get('label', [])
-        if isinstance(labels, str):
-            labels = [labels]
-        options['label'] = list(labels) + [
-            '{}={}'.format(
-                const.CONFIG_HASH_LABEL, config['main']['config_hash']
-            )
-        ]
-        run_command, _ = get_command_with_options(
-            config['run']['command'], config['aliases'], {})
-        if config['run'].get('manage_network', True):
-            networks.create(options.get('network'))
-        exit_code = run(
-            image=config['main']['image'],
-            command=run_command,
-            options=utils.build_docker_options(options),
-            path=config['main']['zenvfilepath']
-        )
+        exit_code = _create_container(config)
         if exit_code:
             return exit_code
-
-        # run init commands:
-        for init_command in config['run']['init_commands']:
-            init_command, init_options = get_command_with_options(
-                init_command, config['aliases'], {}
-            )
-            exec_(container_name, init_command, init_options)
-
     elif container['State']['Status'] in ('exited', 'created'):
         cmd = ['docker', 'start', container_name]
         logger.debug(cmd)
