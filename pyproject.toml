@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "zenv-cli"
-version = "0.4.3"
+version = "0.5.0"
 description = ""
 authors = ["evegny.zuev <zueves@gmail.com>"]
 license = "MIT"
@@ -27,3 +27,7 @@ bpython = "^0.22.1"
 [tool.poetry.scripts]
 zenv = 'zenv.cli:cli'
 ze = 'zenv.cli:exec'
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
