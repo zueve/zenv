@@ -15,13 +15,25 @@ class Default(dict):
         return '{' + key + '}'
 
 
+def resolve_alias(command, aliases):
+    """Expand the first word once and return the declared exec overrides."""
+    alias = aliases.get(command[0])
+    if alias is None:
+        return {'command': command, 'exec': {}}
+    return {
+        'command': alias['command'] + list(command[1:]),
+        'exec': alias.get('exec', {}),
+    }
+
+
 def load_dotenv(dotenvfile):
     try:
         with open(dotenvfile) as file:
             environments = [
-                bind.original.string.strip()
+                f'{bind.key}={bind.value}'
+                if bind.value is not None else bind.key
                 for bind in parser.parse_stream(file)
-                if not bind.error
+                if not bind.error and bind.key is not None
             ]
     except FileNotFoundError:
         raise click.ClickException(f'Env file not found {dotenvfile}')
@@ -29,10 +41,29 @@ def load_dotenv(dotenvfile):
 
 
 def get_config(zenvfile=None):
+    from .fingerprint import config_hash
+
     if not zenvfile:
         zenvfile = find_file(os.getcwd(), fname=const.DEFAULT_FILENAME)
     if not zenvfile:
         raise click.ClickException('Zenvfile don\'t find. Make `zenv init`')
+
+    zenvfile = os.path.abspath(zenvfile)
+    source = Path(zenvfile).read_text()
+
+    # Distinct symbols retain active placeholders while unescaping TOML braces.
+    symbolic_params = Default(
+        uid='__zenv_runtime_uid__', gid='__zenv_runtime_gid__',
+        pwd='__zenv_runtime_pwd__', tty='__zenv_runtime_tty__',
+        zenvfilepath='__zenv_project_directory__', env_excludes='[]',
+    )
+    declared_config = merge_config(
+        toml.loads(source.format_map(symbolic_params)),
+        toml.loads(const.CONFIG_TEMPLATE.format_map(symbolic_params)),
+    )
+    creation_hash = config_hash(
+        declared_config, os.path.dirname(zenvfile)
+    )
 
     params = Default(
         zenvfilepath=os.path.dirname(zenvfile),
@@ -43,7 +74,7 @@ def get_config(zenvfile=None):
         env_excludes='[]'
     )
 
-    content = Path(zenvfile).read_text().format_map(params)
+    content = source.format_map(params)
 
     config = toml.loads(content)
 
@@ -52,6 +83,10 @@ def get_config(zenvfile=None):
     merge_config(origin_config, origin_config['hidden'])
 
     config = merge_config(config, origin_config)
+    for flag in ('manage_network', 'check_zenvfile_changes'):
+        if not isinstance(config['run'][flag], bool):
+            raise click.ClickException('run.{} must be a boolean'.format(flag))
+    config['main']['config_hash'] = creation_hash
 
     # init logging
     if 'debug' in config['main'] and config['main']['debug']:

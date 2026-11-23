@@ -6,6 +6,8 @@ STATUS_STOPED = 'Stoped'
 STATUS_NOT_EXIST = 'Not_exist'
 
 CONTAINER_PREFIX = 'zenv'
+CONFIG_HASH_LABEL = 'zenv.config-hash'
+MANAGED_NETWORK_LABEL = 'zenv.managed-network'
 TEMPLATE_FILENAME = 'template.Zenvfile'
 
 INIT_TEMPLATE = """# Zenvfile - state file for zenv-cli
@@ -18,6 +20,8 @@ name = "{id}-{container_name}"
 debug = false
 
 [run]
+manage_network = true
+check_zenvfile_changes = true
 command = ["__sleep__"]
 init_commands = [["__create_group__"], ["__create_user__"]]
 

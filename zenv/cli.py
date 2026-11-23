@@ -117,7 +117,7 @@ def rm(zenvfile):
     """Remove container (will stop the container, if need)"""
 
     config = utils.get_config(zenvfile)
-    core.rm(config['main']['name'])
+    core.remove_environment(config)
 
 
 @cli.command(name='stop-all')
